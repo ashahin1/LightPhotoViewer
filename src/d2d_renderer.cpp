@@ -691,9 +691,11 @@ void D2DRenderer::RenderHud(TabItem* activeTab, float hudAlpha, POINT mousePt) {
     float gap = 4.0f * m_dpiScale;
 
     std::wstring zoomText = L"1:1";
+    std::wstring fitText = L"Fit";
     if (activeTab) {
         int zPercent = static_cast<int>(activeTab->zoom * 100.0f + 0.5f);
         zoomText = std::to_wstring(zPercent) + L"%";
+        fitText = activeTab->isFitToWindow ? L"1:1" : L"Fit";
     }
 
     struct BtnSpec {
@@ -708,7 +710,7 @@ void D2DRenderer::RenderHud(TabItem* activeTab, float hudAlpha, POINT mousePt) {
         { HudButtonId::ZoomOut,   L"−" },
         { HudButtonId::Zoom100,   zoomText, 48.0f * m_dpiScale },
         { HudButtonId::ZoomIn,    L"+" },
-        { HudButtonId::ZoomFit,   L"Fit", 44.0f * m_dpiScale },
+        { HudButtonId::ZoomFit,   fitText, 44.0f * m_dpiScale },
         { HudButtonId::RotateCCW, L"↶" },
         { HudButtonId::RotateCW,  L"↷" },
         { HudButtonId::Info,      L"ℹ" },
@@ -765,7 +767,13 @@ void D2DRenderer::RenderHud(TabItem* activeTab, float hudAlpha, POINT mousePt) {
             m_d2dContext->FillRoundedRectangle(D2D1::RoundedRect(bRect, 6.0f, 6.0f), m_brushChrome.Get());
             m_brushText->SetColor(D2D1::ColorF(0xffffff, hudAlpha));
         } else {
-            m_brushText->SetColor(D2D1::ColorF(0xd4d4d8, 0.9f * hudAlpha));
+            if (s.id == HudButtonId::ZoomFit && activeTab && activeTab->isFitToWindow) {
+                m_brushChrome->SetColor(D2D1::ColorF(0x27272a, 0.5f * hudAlpha));
+                m_d2dContext->FillRoundedRectangle(D2D1::RoundedRect(bRect, 6.0f, 6.0f), m_brushChrome.Get());
+                m_brushText->SetColor(D2D1::ColorF(0x38bdf8, 0.95f * hudAlpha));
+            } else {
+                m_brushText->SetColor(D2D1::ColorF(0xd4d4d8, 0.9f * hudAlpha));
+            }
         }
 
         m_d2dContext->DrawText(

@@ -429,7 +429,17 @@ void AppWindow::HandleHudAction(HudButtonId id) {
         case HudButtonId::ZoomOut:   ZoomOut(); break;
         case HudButtonId::Zoom100:   Zoom100(); break;
         case HudButtonId::ZoomIn:    ZoomIn(); break;
-        case HudButtonId::ZoomFit:   ZoomFit(); break;
+        case HudButtonId::ZoomFit: {
+            TabItem* tab = m_tabManager.GetActiveTab();
+            if (tab) {
+                if (tab->isFitToWindow) {
+                    Zoom100();
+                } else {
+                    ZoomFit();
+                }
+            }
+            break;
+        }
         case HudButtonId::RotateCCW: RotateCCW(); break;
         case HudButtonId::RotateCW:  RotateCW(); break;
         case HudButtonId::Info:      m_showExif = !m_showExif; Invalidate(); break;
@@ -736,9 +746,17 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
                 }
 
                 case '0':
-                case VK_NUMPAD0:
-                    ZoomFit();
+                case VK_NUMPAD0: {
+                    TabItem* tab = m_tabManager.GetActiveTab();
+                    if (tab) {
+                        if (tab->isFitToWindow) {
+                            Zoom100();
+                        } else {
+                            ZoomFit();
+                        }
+                    }
                     return 0;
+                }
 
                 case '1': {
                     if (m_tabManager.GetTabCount() == 0) {
