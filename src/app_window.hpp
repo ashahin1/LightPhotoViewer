@@ -30,6 +30,8 @@ private:
     bool m_showExif = false;
     bool m_showHelp = false;
     bool m_isFullscreen = false;
+    bool m_isSlideshow = false;
+    ULONGLONG m_lastSlideshowTick = 0;
     WINDOWPLACEMENT m_savedPlacement = { sizeof(WINDOWPLACEMENT) };
 
     // HUD auto-fade
@@ -40,6 +42,9 @@ private:
     void UpdateWindowTitle();
     void ToggleFullscreen();
     void ToggleHelp();
+    void ToggleSlideshow();
+    void CycleBackdrop();
+    void ReopenClosedTab();
     void OpenFileDialog();
     void DeleteCurrentFile();
     void ShowContextMenu(int x, int y);

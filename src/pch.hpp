@@ -20,6 +20,7 @@
 #include <d3d11_1.h>
 #include <d2d1_1.h>
 #include <d2d1_1helper.h>
+#include <d2d1_3.h>
 #include <d2d1effects.h>
 #include <dwrite.h>
 #include <dxgi1_2.h>
@@ -32,6 +33,7 @@
 #include <chrono>
 #include <thread>
 #include <mutex>
+#include <condition_variable>
 #include <atomic>
 #include <filesystem>
 #include <unordered_map>

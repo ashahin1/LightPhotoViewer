@@ -17,9 +17,22 @@ enum class HudButtonId {
     Delete
 };
 
+enum class CanvasBackground {
+    Dark,
+    Checkerboard,
+    Light
+};
+
 struct HudButtonInfo {
     HudButtonId id;
     std::wstring label;
+    D2D1_RECT_F rect;
+    bool isHovered;
+};
+
+struct RecentFileHitBox {
+    int index;
+    std::wstring path;
     D2D1_RECT_F rect;
     bool isHovered;
 };
@@ -31,24 +44,30 @@ public:
 
     bool Initialize(HWND hWnd);
     void Resize(UINT width, UINT height);
-    void Render(TabManager& tabManager, float hudAlpha, bool showExif, bool showHelp, POINT mousePt);
+    void Render(TabManager& tabManager, float hudAlpha, bool showExif, bool showHelp, bool isSlideshow, POINT mousePt);
 
     // Hit testing
     int HitTestTab(POINT pt, const TabManager& tabManager, bool& outCloseButton);
+    bool HitTestTabAdd(POINT pt);
     HudButtonId HitTestHud(POINT pt);
     bool HitTestHelpClose(POINT pt);
     bool HitTestHelpCard(POINT pt);
+    int HitTestRecentFile(POINT pt, std::wstring& outPath);
 
     float GetDpiScale() const { return m_dpiScale; }
     void UpdateDpi(float dpi);
 
     float GetTabStripHeight() const { return 36.0f * m_dpiScale; }
 
+    void CycleBackgroundMode();
+    CanvasBackground GetBackgroundMode() const { return m_bgMode; }
+
 private:
     HWND m_hWnd = nullptr;
     float m_dpiScale = 1.0f;
     UINT m_width = 0;
     UINT m_height = 0;
+    CanvasBackground m_bgMode = CanvasBackground::Dark;
 
     // Direct3D & DXGI
     ComPtr<ID3D11Device> m_d3dDevice;
@@ -80,11 +99,13 @@ private:
     ComPtr<ID2D1SolidColorBrush> m_brushTextMuted;
     ComPtr<ID2D1SolidColorBrush> m_brushBorder;
 
-    // Cached HUD button rects & Help modal rects
+    // Cached UI Element Rects
     std::vector<HudButtonInfo> m_hudButtons;
     D2D1_RECT_F m_hudRect = { 0, 0, 0, 0 };
     D2D1_RECT_F m_helpCardRect = { 0, 0, 0, 0 };
     D2D1_RECT_F m_helpCloseRect = { 0, 0, 0, 0 };
+    D2D1_RECT_F m_tabAddRect = { 0, 0, 0, 0 };
+    std::vector<RecentFileHitBox> m_recentHits;
 
     bool CreateDeviceIndependentResources();
     bool CreateDeviceResources();
@@ -93,8 +114,10 @@ private:
 
     void RenderTabs(TabManager& tabManager, POINT mousePt);
     void RenderImageCanvas(TabItem* tab, float viewportTop, float viewportHeight);
-    void RenderHud(float hudAlpha, POINT mousePt);
+    void RenderHud(TabItem* activeTab, float hudAlpha, POINT mousePt);
     void RenderExifOverlay(TabItem* tab);
     void RenderHelpOverlay(POINT mousePt);
-    void RenderEmptyState();
+    void RenderEmptyState(const TabManager& tabManager, POINT mousePt);
+    void RenderSlideshowBadge();
+    void DrawCheckerboard(D2D1_RECT_F rect);
 };

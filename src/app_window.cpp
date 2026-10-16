@@ -220,11 +220,13 @@ void AppWindow::ShowContextMenu(int x, int y) {
     bool hasDoc = (tab && tab->document && tab->document->isValid);
 
     AppendMenuW(hMenu, MF_STRING, IDM_FILE_OPEN, L"Open Image...\tCtrl+O");
+    AppendMenuW(hMenu, MF_STRING, IDM_FILE_REOPEN_TAB, L"Reopen Closed Tab\tCtrl+Shift+T");
     AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
 
     if (hasDoc) {
         AppendMenuW(hMenu, MF_STRING, IDM_NAV_NEXT, L"Next Image\tRight / Space");
         AppendMenuW(hMenu, MF_STRING, IDM_NAV_PREV, L"Previous Image\tLeft / Backspace");
+        AppendMenuW(hMenu, MF_STRING, IDM_VIEW_SLIDESHOW, m_isSlideshow ? L"Stop Slideshow\tF5 / S" : L"Start Slideshow\tF5 / S");
         AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
 
         AppendMenuW(hMenu, MF_STRING, IDM_VIEW_ZOOM_FIT, L"Fit to Window\t0");
@@ -239,13 +241,18 @@ void AppWindow::ShowContextMenu(int x, int y) {
         AppendMenuW(hMenu, MF_STRING, IDM_VIEW_FLIP_V, L"Flip Vertical\tV");
         AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
 
+        AppendMenuW(hMenu, MF_STRING, IDM_VIEW_BACKDROP, L"Cycle Backdrop (Dark / Grid / Light)\tB");
+        AppendMenuW(hMenu, MF_STRING, IDM_VIEW_INFO, L"Toggle EXIF Info\tI");
+        AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
+
         AppendMenuW(hMenu, MF_STRING, IDM_EDIT_COPY, L"Copy Image\tCtrl+C");
         AppendMenuW(hMenu, MF_STRING, IDM_EDIT_COPY_PATH, L"Copy File Path\tCtrl+Shift+C");
         AppendMenuW(hMenu, MF_STRING, IDM_FILE_REVEAL, L"Reveal in File Explorer");
         AppendMenuW(hMenu, MF_STRING, IDM_FILE_DELETE, L"Delete to Recycle Bin\tDel");
         AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
-
-        AppendMenuW(hMenu, MF_STRING, IDM_VIEW_INFO, L"Toggle EXIF Info\tI");
+    } else {
+        AppendMenuW(hMenu, MF_STRING, IDM_VIEW_BACKDROP, L"Cycle Backdrop (Dark / Grid / Light)\tB");
+        AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
     }
 
     AppendMenuW(hMenu, MF_STRING, IDM_VIEW_FULLSCREEN, L"Fullscreen\tF / F11");
@@ -263,6 +270,26 @@ void AppWindow::ShowContextMenu(int x, int y) {
 void AppWindow::ToggleHelp() {
     m_showHelp = !m_showHelp;
     Invalidate();
+}
+
+void AppWindow::ToggleSlideshow() {
+    m_isSlideshow = !m_isSlideshow;
+    if (m_isSlideshow) {
+        m_lastSlideshowTick = GetTickCount64();
+    }
+    Invalidate();
+}
+
+void AppWindow::CycleBackdrop() {
+    m_renderer.CycleBackgroundMode();
+    Invalidate();
+}
+
+void AppWindow::ReopenClosedTab() {
+    if (m_tabManager.ReopenClosedTab()) {
+        UpdateWindowTitle();
+        Invalidate();
+    }
 }
 
 void AppWindow::NextImage() {
@@ -421,7 +448,7 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         case WM_PAINT: {
             PAINTSTRUCT ps;
             BeginPaint(m_hWnd, &ps);
-            m_renderer.Render(m_tabManager, m_hudAlpha, m_showExif, m_showHelp, m_mousePt);
+            m_renderer.Render(m_tabManager, m_hudAlpha, m_showExif, m_showHelp, m_isSlideshow, m_mousePt);
             EndPaint(m_hWnd, &ps);
             return 0;
         }
@@ -472,6 +499,23 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
                     m_showHelp = false;
                     Invalidate();
                 }
+                return 0;
+            }
+
+            // Check if clicked Recent File on empty state
+            if (m_tabManager.GetTabCount() == 0) {
+                std::wstring recentPath;
+                if (m_renderer.HitTestRecentFile(pt, recentPath) >= 0) {
+                    m_tabManager.OpenTab(recentPath);
+                    UpdateWindowTitle();
+                    Invalidate();
+                    return 0;
+                }
+            }
+
+            // Check if clicked Tab Strip '+' add button
+            if (m_renderer.HitTestTabAdd(pt)) {
+                OpenFileDialog();
                 return 0;
             }
 
@@ -588,6 +632,13 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
                         }
                         return 0;
                     }
+                    case 'T': {
+                        if (shiftDown) {
+                            ReopenClosedTab();
+                            return 0;
+                        }
+                        break;
+                    }
                     case 'C': {
                         TabItem* tab = m_tabManager.GetActiveTab();
                         if (tab && tab->document) {
@@ -628,11 +679,13 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
                 case VK_RIGHT:
                 case VK_SPACE:
                     NextImage();
+                    if (m_isSlideshow) m_lastSlideshowTick = GetTickCount64();
                     return 0;
 
                 case VK_LEFT:
                 case VK_BACK:
                     PrevImage();
+                    if (m_isSlideshow) m_lastSlideshowTick = GetTickCount64();
                     return 0;
 
                 case VK_HOME: {
@@ -666,10 +719,43 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
                     ZoomFit();
                     return 0;
 
-                case '1':
+                case '1': {
+                    if (m_tabManager.GetTabCount() == 0) {
+                        const auto& recents = m_tabManager.GetRecentFiles();
+                        if (!recents.empty()) {
+                            m_tabManager.OpenTab(recents[0]);
+                            UpdateWindowTitle();
+                            Invalidate();
+                            return 0;
+                        }
+                    } else {
+                        Zoom100();
+                        return 0;
+                    }
+                    break;
+                }
+
                 case VK_NUMPAD1:
                     Zoom100();
                     return 0;
+
+                case '2':
+                case '3':
+                case '4':
+                case '5':
+                case '6': {
+                    if (m_tabManager.GetTabCount() == 0) {
+                        size_t idx = static_cast<size_t>(wParam - '1');
+                        const auto& recents = m_tabManager.GetRecentFiles();
+                        if (idx < recents.size()) {
+                            m_tabManager.OpenTab(recents[idx]);
+                            UpdateWindowTitle();
+                            Invalidate();
+                            return 0;
+                        }
+                    }
+                    break;
+                }
 
                 case VK_OEM_PLUS:
                 case VK_ADD:
@@ -703,6 +789,15 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
                     FlipVertical();
                     return 0;
 
+                case 'B':
+                    CycleBackdrop();
+                    return 0;
+
+                case 'S':
+                case VK_F5:
+                    ToggleSlideshow();
+                    return 0;
+
                 case 'I':
                     m_showExif = !m_showExif;
                     Invalidate();
@@ -720,6 +815,9 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
                     if (m_showHelp) {
                         m_showHelp = false;
                         Invalidate();
+                    } else if (m_isSlideshow) {
+                        m_isSlideshow = false;
+                        Invalidate();
                     } else if (m_isFullscreen) {
                         ToggleFullscreen();
                     } else if (m_showExif) {
@@ -734,6 +832,7 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         case WM_COMMAND: {
             switch (LOWORD(wParam)) {
                 case IDM_FILE_OPEN:       OpenFileDialog(); return 0;
+                case IDM_FILE_REOPEN_TAB: ReopenClosedTab(); return 0;
                 case IDM_NAV_NEXT:        NextImage(); return 0;
                 case IDM_NAV_PREV:        PrevImage(); return 0;
                 case IDM_VIEW_ZOOM_FIT:   ZoomFit(); return 0;
@@ -744,6 +843,8 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
                 case IDM_VIEW_ROTATE_CCW: RotateCCW(); return 0;
                 case IDM_VIEW_FLIP_H:     FlipHorizontal(); return 0;
                 case IDM_VIEW_FLIP_V:     FlipVertical(); return 0;
+                case IDM_VIEW_BACKDROP:   CycleBackdrop(); return 0;
+                case IDM_VIEW_SLIDESHOW:  ToggleSlideshow(); return 0;
                 case IDM_VIEW_INFO:       m_showExif = !m_showExif; Invalidate(); return 0;
                 case IDM_VIEW_FULLSCREEN: ToggleFullscreen(); return 0;
                 case IDM_HELP_SHORTCUTS:  ToggleHelp(); return 0;
@@ -855,6 +956,15 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
                     if (m_hudAlpha < 1.0f) {
                         m_hudAlpha = std::min(1.0f, m_hudAlpha + 0.1f);
                         needsRepaint = true;
+                    }
+                }
+
+                // 3. Slideshow Progression (auto-advances every 3 seconds)
+                if (m_isSlideshow) {
+                    ULONGLONG now = GetTickCount64();
+                    if (now - m_lastSlideshowTick >= 3000) {
+                        m_lastSlideshowTick = now;
+                        NextImage();
                     }
                 }
 

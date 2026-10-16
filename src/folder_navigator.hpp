@@ -9,9 +9,9 @@ public:
     ~FolderNavigator();
 
     bool OpenFile(const std::wstring& filePath);
-    bool HasFiles() const { return !m_files.empty(); }
-    size_t GetTotalFiles() const { return m_files.size(); }
-    int GetCurrentIndex() const { return m_currentIndex; }
+    bool HasFiles() const;
+    size_t GetTotalFiles() const;
+    int GetCurrentIndex() const;
     std::wstring GetCurrentFilePath() const;
 
     std::shared_ptr<ImageDocument> GetCurrentDocument();
@@ -24,11 +24,14 @@ public:
     void RefreshFolder();
 
 private:
+    mutable std::mutex m_navMutex;
     std::wstring m_currentFolder;
     std::vector<std::wstring> m_files;
     int m_currentIndex = -1;
 
-    // Speculative Pre-Decode LRU Cache
+    // Speculative Pre-Decode LRU Cache & Event Synchronization
+    std::mutex m_cvMutex;
+    std::condition_variable m_cv;
     std::mutex m_cacheMutex;
     std::unordered_map<std::wstring, std::shared_ptr<ImageDocument>> m_cache;
     std::thread m_workerThread;

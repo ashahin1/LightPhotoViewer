@@ -6,7 +6,7 @@ struct FrameData {
     UINT width = 0;
     UINT height = 0;
     UINT delayMs = 100;
-    ComPtr<IWICFormatConverter> converter;
+    ComPtr<IWICBitmap> bitmap; // Eagerly decoded in-memory PBGRA bitmap (zero file locking)
 };
 
 struct ImageMetadata {
@@ -21,6 +21,7 @@ struct ImageMetadata {
     std::wstring exposure;
     std::wstring iso;
     bool isAnimated = false;
+    bool isSvg = false;
     size_t frameCount = 1;
     UINT loopCount = 0; // 0 = loop forever
 };
@@ -45,18 +46,19 @@ public:
     static ImageEngine& Instance();
 
     bool Initialize();
+    IWICImagingFactory* GetThreadWicFactory();
+
     std::shared_ptr<ImageDocument> LoadFromFile(const std::wstring& filePath);
     bool CopyToClipboard(HWND hWnd, const FrameData& frame);
-
-    IWICImagingFactory* GetWicFactory() const { return m_wicFactory.Get(); }
 
 private:
     ImageEngine() = default;
     ~ImageEngine() = default;
 
-    ComPtr<IWICImagingFactory> m_wicFactory;
+    ComPtr<IWICImagingFactory> m_mainWicFactory;
     bool m_initialized = false;
 
-    void ParseExifMetadata(IWICBitmapFrameDecode* frame, ImageMetadata& meta);
-    WICBitmapTransformOptions GetExifTransform(IWICBitmapFrameDecode* frame);
+    void ParseExifMetadata(IWICMetadataQueryReader* reader, ImageMetadata& meta);
+    WICBitmapTransformOptions GetExifTransform(IWICMetadataQueryReader* reader);
+    bool LoadSvgMetadata(const std::wstring& filePath, ImageMetadata& meta);
 };

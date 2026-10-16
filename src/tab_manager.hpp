@@ -24,6 +24,7 @@ struct TabItem {
 
     // Direct2D GPU bitmaps (instantiated on render thread)
     std::vector<ComPtr<ID2D1Bitmap1>> gpuBitmaps;
+    ComPtr<ID2D1SvgDocument> svgDocument;
 
     void ResetTransforms() {
         zoom = 1.0f;
@@ -39,12 +40,13 @@ struct TabItem {
 
     void ClearGpuBitmaps() {
         gpuBitmaps.clear();
+        svgDocument.Reset();
     }
 };
 
 class TabManager {
 public:
-    TabManager() = default;
+    TabManager();
     ~TabManager() = default;
 
     bool OpenTab(const std::wstring& filePath);
@@ -52,6 +54,7 @@ public:
     bool SelectTab(size_t index);
     void NextTab();
     void PrevTab();
+    bool ReopenClosedTab();
 
     size_t GetTabCount() const { return m_tabs.size(); }
     int GetActiveIndex() const { return m_activeIndex; }
@@ -60,7 +63,15 @@ public:
 
     bool ShouldShowTabs() const { return m_tabs.size() > 1; }
 
+    const std::vector<std::wstring>& GetRecentFiles() const { return m_recentFiles; }
+    void AddRecentFile(const std::wstring& path);
+
 private:
     std::vector<std::unique_ptr<TabItem>> m_tabs;
     int m_activeIndex = -1;
+    std::deque<std::wstring> m_closedTabs;
+    std::vector<std::wstring> m_recentFiles;
+
+    void LoadRecentFilesFromRegistry();
+    void SaveRecentFilesToRegistry();
 };

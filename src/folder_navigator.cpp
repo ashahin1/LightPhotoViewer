@@ -9,6 +9,7 @@ FolderNavigator::FolderNavigator() {
 FolderNavigator::~FolderNavigator() {
     m_stopWorker = true;
     m_predecodeRequested = true;
+    m_cv.notify_all();
     if (m_workerThread.joinable()) {
         m_workerThread.join();
     }
@@ -26,6 +27,7 @@ bool FolderNavigator::IsSupportedExtension(const std::wstring& ext) {
 }
 
 void FolderNavigator::ScanFolder(const std::wstring& folderPath, const std::wstring& initialFile) {
+    std::lock_guard<std::mutex> lock(m_navMutex);
     m_files.clear();
     m_currentIndex = -1;
     m_currentFolder = folderPath;
@@ -60,12 +62,10 @@ void FolderNavigator::ScanFolder(const std::wstring& folderPath, const std::wstr
 
     FindClose(hFind);
 
-    // Natural numerical sorting matching Windows Explorer (e.g. img2 before img10)
     std::sort(m_files.begin(), m_files.end(), [](const std::wstring& a, const std::wstring& b) {
         return StrCmpLogicalW(a.c_str(), b.c_str()) < 0;
     });
 
-    // Locate initial file
     for (size_t i = 0; i < m_files.size(); ++i) {
         if (_wcsicmp(m_files[i].c_str(), initialFile.c_str()) == 0) {
             m_currentIndex = static_cast<int>(i);
@@ -92,15 +92,39 @@ bool FolderNavigator::OpenFile(const std::wstring& filePath) {
     }
 }
 
+bool FolderNavigator::HasFiles() const {
+    std::lock_guard<std::mutex> lock(m_navMutex);
+    return !m_files.empty();
+}
+
+size_t FolderNavigator::GetTotalFiles() const {
+    std::lock_guard<std::mutex> lock(m_navMutex);
+    return m_files.size();
+}
+
+int FolderNavigator::GetCurrentIndex() const {
+    std::lock_guard<std::mutex> lock(m_navMutex);
+    return m_currentIndex;
+}
+
 void FolderNavigator::RefreshFolder() {
-    if (m_currentIndex >= 0 && m_currentIndex < static_cast<int>(m_files.size())) {
-        std::wstring current = m_files[m_currentIndex];
-        ScanFolder(m_currentFolder, current);
+    std::wstring folder;
+    std::wstring current;
+    {
+        std::lock_guard<std::mutex> lock(m_navMutex);
+        if (m_currentIndex >= 0 && m_currentIndex < static_cast<int>(m_files.size())) {
+            current = m_files[m_currentIndex];
+            folder = m_currentFolder;
+        }
+    }
+    if (!folder.empty()) {
+        ScanFolder(folder, current);
         RequestPredecode();
     }
 }
 
 std::wstring FolderNavigator::GetCurrentFilePath() const {
+    std::lock_guard<std::mutex> lock(m_navMutex);
     if (m_currentIndex >= 0 && m_currentIndex < static_cast<int>(m_files.size())) {
         return m_files[m_currentIndex];
     }
@@ -134,98 +158,133 @@ std::shared_ptr<ImageDocument> FolderNavigator::GetCurrentDocument() {
 }
 
 std::shared_ptr<ImageDocument> FolderNavigator::NavigateNext() {
-    if (m_files.empty()) return nullptr;
-
-    m_currentIndex = (m_currentIndex + 1) % static_cast<int>(m_files.size());
-    return GetCurrentDocument();
+    std::wstring nextPath;
+    {
+        std::lock_guard<std::mutex> lock(m_navMutex);
+        if (m_files.empty()) return nullptr;
+        m_currentIndex = (m_currentIndex + 1) % static_cast<int>(m_files.size());
+        nextPath = m_files[m_currentIndex];
+    }
+    auto doc = LoadOrFetch(nextPath);
+    RequestPredecode();
+    return doc;
 }
 
 std::shared_ptr<ImageDocument> FolderNavigator::NavigatePrev() {
-    if (m_files.empty()) return nullptr;
-
-    m_currentIndex = (m_currentIndex - 1 + static_cast<int>(m_files.size())) % static_cast<int>(m_files.size());
-    return GetCurrentDocument();
+    std::wstring prevPath;
+    {
+        std::lock_guard<std::mutex> lock(m_navMutex);
+        if (m_files.empty()) return nullptr;
+        m_currentIndex = (m_currentIndex - 1 + static_cast<int>(m_files.size())) % static_cast<int>(m_files.size());
+        prevPath = m_files[m_currentIndex];
+    }
+    auto doc = LoadOrFetch(prevPath);
+    RequestPredecode();
+    return doc;
 }
 
 std::shared_ptr<ImageDocument> FolderNavigator::NavigateFirst() {
-    if (m_files.empty()) return nullptr;
-
-    m_currentIndex = 0;
-    return GetCurrentDocument();
+    std::wstring firstPath;
+    {
+        std::lock_guard<std::mutex> lock(m_navMutex);
+        if (m_files.empty()) return nullptr;
+        m_currentIndex = 0;
+        firstPath = m_files[0];
+    }
+    auto doc = LoadOrFetch(firstPath);
+    RequestPredecode();
+    return doc;
 }
 
 std::shared_ptr<ImageDocument> FolderNavigator::NavigateLast() {
-    if (m_files.empty()) return nullptr;
-
-    m_currentIndex = static_cast<int>(m_files.size()) - 1;
-    return GetCurrentDocument();
+    std::wstring lastPath;
+    {
+        std::lock_guard<std::mutex> lock(m_navMutex);
+        if (m_files.empty()) return nullptr;
+        m_currentIndex = static_cast<int>(m_files.size()) - 1;
+        lastPath = m_files[m_currentIndex];
+    }
+    auto doc = LoadOrFetch(lastPath);
+    RequestPredecode();
+    return doc;
 }
 
 void FolderNavigator::RequestPredecode() {
     m_predecodeRequested = true;
+    m_cv.notify_one();
 }
 
 void FolderNavigator::WorkerLoop() {
+    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+
     while (!m_stopWorker) {
-        if (m_predecodeRequested.exchange(false)) {
-            std::wstring nextToPreload;
-            std::wstring prevToPreload;
-            std::wstring currentPath;
+        {
+            std::unique_lock<std::mutex> cvLock(m_cvMutex);
+            m_cv.wait(cvLock, [this]() {
+                return m_stopWorker.load() || m_predecodeRequested.load();
+            });
+            if (m_stopWorker) break;
+            m_predecodeRequested = false;
+        }
 
-            {
-                if (m_currentIndex >= 0 && !m_files.empty()) {
-                    currentPath = m_files[m_currentIndex];
-                    int nextIdx = (m_currentIndex + 1) % static_cast<int>(m_files.size());
-                    int prevIdx = (m_currentIndex - 1 + static_cast<int>(m_files.size())) % static_cast<int>(m_files.size());
+        std::wstring nextToPreload;
+        std::wstring prevToPreload;
+        std::wstring currentPath;
 
-                    if (nextIdx != m_currentIndex) nextToPreload = m_files[nextIdx];
-                    if (prevIdx != m_currentIndex && prevIdx != nextIdx) prevToPreload = m_files[prevIdx];
-                }
+        {
+            std::lock_guard<std::mutex> lock(m_navMutex);
+            if (m_currentIndex >= 0 && !m_files.empty()) {
+                currentPath = m_files[m_currentIndex];
+                int nextIdx = (m_currentIndex + 1) % static_cast<int>(m_files.size());
+                int prevIdx = (m_currentIndex - 1 + static_cast<int>(m_files.size())) % static_cast<int>(m_files.size());
+
+                if (nextIdx != m_currentIndex) nextToPreload = m_files[nextIdx];
+                if (prevIdx != m_currentIndex && prevIdx != nextIdx) prevToPreload = m_files[prevIdx];
             }
+        }
 
-            if (!nextToPreload.empty() && !m_stopWorker) {
-                bool needed = false;
-                {
-                    std::lock_guard<std::mutex> lock(m_cacheMutex);
-                    needed = (m_cache.find(nextToPreload) == m_cache.end());
-                }
-                if (needed) {
-                    auto doc = ImageEngine::Instance().LoadFromFile(nextToPreload);
-                    if (doc) {
-                        std::lock_guard<std::mutex> lock(m_cacheMutex);
-                        m_cache[nextToPreload] = doc;
-                    }
-                }
-            }
-
-            if (!prevToPreload.empty() && !m_stopWorker) {
-                bool needed = false;
-                {
-                    std::lock_guard<std::mutex> lock(m_cacheMutex);
-                    needed = (m_cache.find(prevToPreload) == m_cache.end());
-                }
-                if (needed) {
-                    auto doc = ImageEngine::Instance().LoadFromFile(prevToPreload);
-                    if (doc) {
-                        std::lock_guard<std::mutex> lock(m_cacheMutex);
-                        m_cache[prevToPreload] = doc;
-                    }
-                }
-            }
-
-            // Prune distant cache items to keep RAM strictly capped
+        if (!nextToPreload.empty() && !m_stopWorker) {
+            bool needed = false;
             {
                 std::lock_guard<std::mutex> lock(m_cacheMutex);
-                for (auto it = m_cache.begin(); it != m_cache.end(); ) {
-                    if (it->first != currentPath && it->first != nextToPreload && it->first != prevToPreload) {
-                        it = m_cache.erase(it);
-                    } else {
-                        ++it;
-                    }
+                needed = (m_cache.find(nextToPreload) == m_cache.end());
+            }
+            if (needed) {
+                auto doc = ImageEngine::Instance().LoadFromFile(nextToPreload);
+                if (doc) {
+                    std::lock_guard<std::mutex> lock(m_cacheMutex);
+                    m_cache[nextToPreload] = doc;
                 }
             }
         }
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        if (!prevToPreload.empty() && !m_stopWorker) {
+            bool needed = false;
+            {
+                std::lock_guard<std::mutex> lock(m_cacheMutex);
+                needed = (m_cache.find(prevToPreload) == m_cache.end());
+            }
+            if (needed) {
+                auto doc = ImageEngine::Instance().LoadFromFile(prevToPreload);
+                if (doc) {
+                    std::lock_guard<std::mutex> lock(m_cacheMutex);
+                    m_cache[prevToPreload] = doc;
+                }
+            }
+        }
+
+        // Evict distant cached items
+        {
+            std::lock_guard<std::mutex> lock(m_cacheMutex);
+            for (auto it = m_cache.begin(); it != m_cache.end(); ) {
+                if (it->first != currentPath && it->first != nextToPreload && it->first != prevToPreload) {
+                    it = m_cache.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+        }
     }
+
+    CoUninitialize();
 }
