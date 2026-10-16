@@ -132,12 +132,15 @@ $cppFiles = Get-ChildItem -Path "src" -Filter "*.cpp" | Where-Object { $_.Name -
 $objsToLink = @($pchObj)
 $cppToCompile = @()
 
+$hppFiles = Get-ChildItem -Path "src" -Filter "*.hpp"
+$latestHppTime = if ($hppFiles) { ($hppFiles | Measure-Object -Property LastWriteTimeUtc -Maximum).Maximum } else { [DateTime]::MinValue }
+
 foreach ($f in $cppFiles) {
     $objFile = "bin\obj\$($f.BaseName).obj"
     $needCompile = $pchRebuilt -or (-not (Test-Path $objFile))
     if (-not $needCompile) {
         $objTime = (Get-Item $objFile).LastWriteTimeUtc
-        if ($f.LastWriteTimeUtc -gt $objTime) {
+        if ($f.LastWriteTimeUtc -gt $objTime -or $latestHppTime -gt $objTime) {
             $needCompile = $true
         }
     }

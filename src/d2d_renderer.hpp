@@ -31,11 +31,13 @@ public:
 
     bool Initialize(HWND hWnd);
     void Resize(UINT width, UINT height);
-    void Render(TabManager& tabManager, float hudAlpha, bool showExif, POINT mousePt);
+    void Render(TabManager& tabManager, float hudAlpha, bool showExif, bool showHelp, POINT mousePt);
 
     // Hit testing
     int HitTestTab(POINT pt, const TabManager& tabManager, bool& outCloseButton);
     HudButtonId HitTestHud(POINT pt);
+    bool HitTestHelpClose(POINT pt);
+    bool HitTestHelpCard(POINT pt);
 
     float GetDpiScale() const { return m_dpiScale; }
     void UpdateDpi(float dpi);
@@ -66,6 +68,9 @@ private:
     ComPtr<IDWriteTextFormat> m_formatInfo;
     ComPtr<IDWriteTextFormat> m_formatTitle;
     ComPtr<IDWriteTextFormat> m_formatSubtitle;
+    ComPtr<IDWriteTextFormat> m_formatHelpCat;
+    ComPtr<IDWriteTextFormat> m_formatKeycap;
+    ComPtr<IDWriteTextFormat> m_formatKeyDesc;
 
     // Brushes
     ComPtr<ID2D1SolidColorBrush> m_brushBg;
@@ -75,9 +80,11 @@ private:
     ComPtr<ID2D1SolidColorBrush> m_brushTextMuted;
     ComPtr<ID2D1SolidColorBrush> m_brushBorder;
 
-    // Cached HUD button rects
+    // Cached HUD button rects & Help modal rects
     std::vector<HudButtonInfo> m_hudButtons;
     D2D1_RECT_F m_hudRect = { 0, 0, 0, 0 };
+    D2D1_RECT_F m_helpCardRect = { 0, 0, 0, 0 };
+    D2D1_RECT_F m_helpCloseRect = { 0, 0, 0, 0 };
 
     bool CreateDeviceIndependentResources();
     bool CreateDeviceResources();
@@ -88,5 +95,6 @@ private:
     void RenderImageCanvas(TabItem* tab, float viewportTop, float viewportHeight);
     void RenderHud(float hudAlpha, POINT mousePt);
     void RenderExifOverlay(TabItem* tab);
+    void RenderHelpOverlay(POINT mousePt);
     void RenderEmptyState();
 };

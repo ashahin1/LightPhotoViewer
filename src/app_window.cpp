@@ -249,6 +249,8 @@ void AppWindow::ShowContextMenu(int x, int y) {
     }
 
     AppendMenuW(hMenu, MF_STRING, IDM_VIEW_FULLSCREEN, L"Fullscreen\tF / F11");
+    AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(hMenu, MF_STRING, IDM_HELP_SHORTCUTS, L"Keyboard Shortcuts...\tF1");
 
     if (m_tabManager.GetTabCount() > 0) {
         AppendMenuW(hMenu, MF_STRING, IDM_FILE_CLOSE_TAB, L"Close Tab\tCtrl+W");
@@ -256,6 +258,11 @@ void AppWindow::ShowContextMenu(int x, int y) {
 
     TrackPopupMenuEx(hMenu, TPM_RIGHTBUTTON, x, y, m_hWnd, nullptr);
     DestroyMenu(hMenu);
+}
+
+void AppWindow::ToggleHelp() {
+    m_showHelp = !m_showHelp;
+    Invalidate();
 }
 
 void AppWindow::NextImage() {
@@ -414,7 +421,7 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         case WM_PAINT: {
             PAINTSTRUCT ps;
             BeginPaint(m_hWnd, &ps);
-            m_renderer.Render(m_tabManager, m_hudAlpha, m_showExif, m_mousePt);
+            m_renderer.Render(m_tabManager, m_hudAlpha, m_showExif, m_showHelp, m_mousePt);
             EndPaint(m_hWnd, &ps);
             return 0;
         }
@@ -458,6 +465,15 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
 
         case WM_LBUTTONDOWN: {
             POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+
+            // If Help Overlay is active, handle close button or backdrop click
+            if (m_showHelp) {
+                if (m_renderer.HitTestHelpClose(pt) || !m_renderer.HitTestHelpCard(pt)) {
+                    m_showHelp = false;
+                    Invalidate();
+                }
+                return 0;
+            }
 
             // Check if clicked Tab Strip
             bool isCloseBtn = false;
@@ -696,8 +712,15 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
                     DeleteCurrentFile();
                     return 0;
 
+                case VK_F1:
+                    ToggleHelp();
+                    return 0;
+
                 case VK_ESCAPE:
-                    if (m_isFullscreen) {
+                    if (m_showHelp) {
+                        m_showHelp = false;
+                        Invalidate();
+                    } else if (m_isFullscreen) {
                         ToggleFullscreen();
                     } else if (m_showExif) {
                         m_showExif = false;
@@ -723,6 +746,7 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
                 case IDM_VIEW_FLIP_V:     FlipVertical(); return 0;
                 case IDM_VIEW_INFO:       m_showExif = !m_showExif; Invalidate(); return 0;
                 case IDM_VIEW_FULLSCREEN: ToggleFullscreen(); return 0;
+                case IDM_HELP_SHORTCUTS:  ToggleHelp(); return 0;
                 case IDM_FILE_DELETE:     DeleteCurrentFile(); return 0;
                 case IDM_FILE_CLOSE_TAB: {
                     if (m_tabManager.GetActiveIndex() >= 0) {

@@ -4,11 +4,11 @@
 
 <p align="center">
   <b>An ultra-fast, minimalist, hardware-accelerated image viewer for Windows.</b><br>
-  <sub>311 KB · 230 ms launch · 32–48 MB RAM · Zero runtime DLLs · C++20 · Direct2D/Direct3D 11</sub>
+  <sub>336 KB · ~220 ms launch · 32–48 MB RAM · Zero runtime DLLs · C++20 · Direct2D/Direct3D 11</sub>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/binary-311_KB-brightgreen?style=flat-square" alt="Size">
+  <img src="https://img.shields.io/badge/binary-336_KB-brightgreen?style=flat-square" alt="Size">
   <img src="https://img.shields.io/badge/RAM-32--48_MB-7B1FA2?style=flat-square" alt="RAM">
   <img src="https://img.shields.io/badge/C%2B%2B20-MSVC_14.44-E65100?style=flat-square" alt="C++20">
   <img src="https://img.shields.io/badge/platform-Windows_10%2F11-0078D6?style=flat-square" alt="Windows">
@@ -41,7 +41,8 @@ LightPhotoViewer.exe /unregister /silent
 | Feature | Description |
 |---|---|
 | ⚡ **Instant Cold Launch** | Starts instantly &mdash; 5x–10x faster than the default Windows Photos app |
-| 🪶 **Microscopic Footprint** | **311 KB** single `.exe`, **zero external DLLs**, fully static CRT (`/MT`) |
+| 🪶 **Microscopic Footprint** | **336 KB** single `.exe`, **zero external DLLs**, fully static CRT (`/MT`) |
+| ⌨️ **Interactive F1 Help** | Press `F1` anytime for an in-canvas categorized Direct2D shortcuts dialog |
 | 🎮 **Direct2D GPU Rendering** | 60/120/144 Hz hardware-accelerated canvas with high-quality bicubic downsampling, smooth pan/zoom, and pixel-grid rendering at high zoom |
 | 🗂️ **Smart Multi-Tabs** | Auto-hiding tab bar: invisible with 1 image open, appears when 2+ images are opened; middle-click close and `Ctrl+W` |
 | 🚀 **Single Instance** | Opening images from Windows Explorer forwards directly into new tabs of the active window via `WM_COPYDATA` |

@@ -95,6 +95,46 @@ bool D2DRenderer::CreateDeviceIndependentResources() {
         m_formatSubtitle->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
     }
 
+    m_dwriteFactory->CreateTextFormat(
+        L"Segoe UI",
+        nullptr,
+        DWRITE_FONT_WEIGHT_SEMI_BOLD,
+        DWRITE_FONT_STYLE_NORMAL,
+        DWRITE_FONT_STRETCH_NORMAL,
+        13.0f * m_dpiScale,
+        L"en-US",
+        &m_formatHelpCat
+    );
+
+    m_dwriteFactory->CreateTextFormat(
+        L"Segoe UI",
+        nullptr,
+        DWRITE_FONT_WEIGHT_SEMI_BOLD,
+        DWRITE_FONT_STYLE_NORMAL,
+        DWRITE_FONT_STRETCH_NORMAL,
+        11.0f * m_dpiScale,
+        L"en-US",
+        &m_formatKeycap
+    );
+    if (m_formatKeycap) {
+        m_formatKeycap->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+        m_formatKeycap->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    }
+
+    m_dwriteFactory->CreateTextFormat(
+        L"Segoe UI",
+        nullptr,
+        DWRITE_FONT_WEIGHT_NORMAL,
+        DWRITE_FONT_STYLE_NORMAL,
+        DWRITE_FONT_STRETCH_NORMAL,
+        11.5f * m_dpiScale,
+        L"en-US",
+        &m_formatKeyDesc
+    );
+    if (m_formatKeyDesc) {
+        m_formatKeyDesc->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    }
+
     return true;
 }
 
@@ -311,7 +351,17 @@ HudButtonId D2DRenderer::HitTestHud(POINT pt) {
     return HudButtonId::None;
 }
 
-void D2DRenderer::Render(TabManager& tabManager, float hudAlpha, bool showExif, POINT mousePt) {
+bool D2DRenderer::HitTestHelpClose(POINT pt) {
+    return (pt.x >= m_helpCloseRect.left && pt.x <= m_helpCloseRect.right &&
+            pt.y >= m_helpCloseRect.top && pt.y <= m_helpCloseRect.bottom);
+}
+
+bool D2DRenderer::HitTestHelpCard(POINT pt) {
+    return (pt.x >= m_helpCardRect.left && pt.x <= m_helpCardRect.right &&
+            pt.y >= m_helpCardRect.top && pt.y <= m_helpCardRect.bottom);
+}
+
+void D2DRenderer::Render(TabManager& tabManager, float hudAlpha, bool showExif, bool showHelp, POINT mousePt) {
     if (!CreateDeviceResources()) return;
 
     m_d2dContext->BeginDraw();
@@ -336,6 +386,13 @@ void D2DRenderer::Render(TabManager& tabManager, float hudAlpha, bool showExif, 
         if (showExif) {
             RenderExifOverlay(activeTab);
         }
+    }
+
+    if (showHelp) {
+        RenderHelpOverlay(mousePt);
+    } else {
+        m_helpCardRect = { 0, 0, 0, 0 };
+        m_helpCloseRect = { 0, 0, 0, 0 };
     }
 
     HRESULT hr = m_d2dContext->EndDraw();
@@ -734,9 +791,189 @@ void D2DRenderer::RenderEmptyState() {
 
     const wchar_t hints[] =
         L"← / → : Browse Folder      Mouse Wheel : Cursor-Centered Zoom\n"
-        L"0 : Fit to Window          1 : 100% Actual Size\n"
-        L"F : Fullscreen             R / L : Rotate CW / CCW          I : EXIF Info";
+        L"0 : Fit to Window          1 : 100% Actual Size          F : Fullscreen\n"
+        L"R / L : Rotate CW / CCW    I : EXIF Info                 F1 : Shortcuts Help";
 
     D2D1_RECT_F hRect = D2D1::RectF(cardX + 16.0f * m_dpiScale, cardY + 12.0f * m_dpiScale, cardX + cardW - 16.0f * m_dpiScale, cardY + cardH - 12.0f * m_dpiScale);
     m_d2dContext->DrawText(hints, static_cast<UINT32>(wcslen(hints)), m_formatInfo.Get(), hRect, m_brushTextMuted.Get());
 }
+
+void D2DRenderer::RenderHelpOverlay(POINT mousePt) {
+    float clientW = static_cast<float>(m_width);
+    float clientH = static_cast<float>(m_height);
+
+    // 1. Semi-transparent backdrop
+    m_brushBg->SetColor(D2D1::ColorF(0x000000, 0.72f));
+    m_d2dContext->FillRectangle(D2D1::RectF(0, 0, clientW, clientH), m_brushBg.Get());
+
+    // 2. Centered Modal Card
+    float cardW = std::min(780.0f * m_dpiScale, clientW - 32.0f);
+    float cardH = std::min(520.0f * m_dpiScale, clientH - 32.0f);
+    float cardX = (clientW - cardW) / 2.0f;
+    float cardY = (clientH - cardH) / 2.0f;
+
+    m_helpCardRect = D2D1::RectF(cardX, cardY, cardX + cardW, cardY + cardH);
+
+    // Frosted Card Background
+    m_brushChrome->SetColor(D2D1::ColorF(0x18181b, 0.96f));
+    m_d2dContext->FillRoundedRectangle(D2D1::RoundedRect(m_helpCardRect, 12.0f, 12.0f), m_brushChrome.Get());
+
+    // Card Border
+    m_brushBorder->SetColor(D2D1::ColorF(0x3f3f46, 0.9f));
+    m_d2dContext->DrawRoundedRectangle(D2D1::RoundedRect(m_helpCardRect, 12.0f, 12.0f), m_brushBorder.Get(), 1.5f);
+
+    // Header Title
+    float headerPad = 20.0f * m_dpiScale;
+    float titleY = cardY + 16.0f * m_dpiScale;
+
+    m_brushText->SetColor(D2D1::ColorF(0xf8fafc));
+    const wchar_t title[] = L"Keyboard & Mouse Shortcuts";
+    D2D1_RECT_F titleRect = D2D1::RectF(cardX + headerPad, titleY, cardX + cardW - 60.0f * m_dpiScale, titleY + 24.0f * m_dpiScale);
+    m_d2dContext->DrawText(title, static_cast<UINT32>(wcslen(title)), m_formatHud.Get(), titleRect, m_brushText.Get());
+
+    // Subtitle
+    m_brushTextMuted->SetColor(D2D1::ColorF(0x94a3b8));
+    const wchar_t sub[] = L"LightPhotoViewer Quick Reference Guide";
+    D2D1_RECT_F subRect = D2D1::RectF(cardX + headerPad, titleY + 22.0f * m_dpiScale, cardX + cardW - 60.0f * m_dpiScale, titleY + 40.0f * m_dpiScale);
+    m_d2dContext->DrawText(sub, static_cast<UINT32>(wcslen(sub)), m_formatKeyDesc.Get(), subRect, m_brushTextMuted.Get());
+
+    // Close button ('✕')
+    float closeSize = 24.0f * m_dpiScale;
+    float closeX1 = cardX + cardW - headerPad - closeSize;
+    float closeY1 = cardY + 16.0f * m_dpiScale;
+    m_helpCloseRect = D2D1::RectF(closeX1, closeY1, closeX1 + closeSize, closeY1 + closeSize);
+
+    bool isCloseHover = (mousePt.x >= m_helpCloseRect.left && mousePt.x <= m_helpCloseRect.right &&
+                         mousePt.y >= m_helpCloseRect.top && mousePt.y <= m_helpCloseRect.bottom);
+
+    if (isCloseHover) {
+        m_brushChrome->SetColor(D2D1::ColorF(0xef4444, 0.85f));
+        m_d2dContext->FillRoundedRectangle(D2D1::RoundedRect(m_helpCloseRect, 4.0f, 4.0f), m_brushChrome.Get());
+        m_brushText->SetColor(D2D1::ColorF(0xffffff));
+    } else {
+        m_brushText->SetColor(D2D1::ColorF(0x94a3b8));
+    }
+    const wchar_t closeIcon[] = L"✕";
+    m_d2dContext->DrawText(closeIcon, 1, m_formatHud.Get(), m_helpCloseRect, m_brushText.Get());
+
+    // Divider Line below header
+    float divY = cardY + 60.0f * m_dpiScale;
+    m_brushBorder->SetColor(D2D1::ColorF(0x27272a, 1.0f));
+    m_d2dContext->DrawLine(D2D1::Point2F(cardX + headerPad, divY), D2D1::Point2F(cardX + cardW - headerPad, divY), m_brushBorder.Get(), 1.0f);
+
+    // 3 Columns Layout
+    struct ShortcutItem {
+        const wchar_t* key;
+        const wchar_t* desc;
+    };
+    struct ShortcutSection {
+        const wchar_t* title;
+        std::vector<ShortcutItem> items;
+    };
+
+    std::vector<ShortcutSection> col1 = {
+        {
+            L"NAVIGATION",
+            {
+                { L"→ / Space", L"Next image" },
+                { L"← / Back",  L"Previous image" },
+                { L"Home / End",L"First / Last file" },
+                { L"Delete",    L"Send to Recycle Bin" },
+            }
+        },
+        {
+            L"FILE & TABS",
+            {
+                { L"Ctrl + O",     L"Open image..." },
+                { L"Ctrl + W",     L"Close active tab" },
+                { L"Ctrl + Tab",   L"Next tab" },
+                { L"Ctrl+Shift+Tab", L"Previous tab" },
+            }
+        }
+    };
+
+    std::vector<ShortcutSection> col2 = {
+        {
+            L"ZOOM & VIEW",
+            {
+                { L"0",           L"Fit to window" },
+                { L"1",           L"100% Actual size" },
+                { L"+ / Wheel",   L"Zoom in (focal)" },
+                { L"- / Wheel",   L"Zoom out (focal)" },
+                { L"Left Drag",   L"Pan canvas" },
+                { L"Double Click",L"Toggle Fit / 100%" },
+                { L"Middle Click",L"Reset to Fit" },
+                { L"F / Enter",   L"Toggle fullscreen" },
+            }
+        }
+    };
+
+    std::vector<ShortcutSection> col3 = {
+        {
+            L"TOOLS & ACTIONS",
+            {
+                { L"R",           L"Rotate 90° CW" },
+                { L"L",           L"Rotate 90° CCW" },
+                { L"H / V",       L"Flip Horiz / Vert" },
+                { L"I",           L"Toggle EXIF info" },
+                { L"Ctrl + C",    L"Copy bitmap" },
+                { L"Ctrl+Shift+C",L"Copy file path" },
+                { L"F1",          L"Toggle this help" },
+                { L"Esc",         L"Close / Exit" },
+            }
+        }
+    };
+
+    std::vector<std::vector<ShortcutSection>> columns = { col1, col2, col3 };
+    float colGap = 16.0f * m_dpiScale;
+    float contentW = cardW - headerPad * 2.0f;
+    float colW = (contentW - colGap * 2.0f) / 3.0f;
+    float startY = divY + 14.0f * m_dpiScale;
+
+    auto DrawSection = [&](const ShortcutSection& sec, float cx, float& cy) {
+        m_brushAccent->SetColor(D2D1::ColorF(0x06b6d4)); // Cyan
+        D2D1_RECT_F stRect = D2D1::RectF(cx, cy, cx + colW, cy + 18.0f * m_dpiScale);
+        m_d2dContext->DrawText(sec.title, static_cast<UINT32>(wcslen(sec.title)), m_formatHelpCat.Get(), stRect, m_brushAccent.Get());
+        cy += 24.0f * m_dpiScale;
+
+        float rowH = 25.0f * m_dpiScale;
+        for (const auto& item : sec.items) {
+            float keycapW = std::min(92.0f * m_dpiScale, colW * 0.44f);
+            D2D1_RECT_F kRect = D2D1::RectF(cx, cy, cx + keycapW, cy + rowH - 4.0f * m_dpiScale);
+
+            m_brushChrome->SetColor(D2D1::ColorF(0x27272a, 0.9f));
+            m_d2dContext->FillRoundedRectangle(D2D1::RoundedRect(kRect, 4.0f, 4.0f), m_brushChrome.Get());
+            m_brushBorder->SetColor(D2D1::ColorF(0x3f3f46, 0.7f));
+            m_d2dContext->DrawRoundedRectangle(D2D1::RoundedRect(kRect, 4.0f, 4.0f), m_brushBorder.Get(), 1.0f);
+
+            m_brushText->SetColor(D2D1::ColorF(0xf1f5f9));
+            m_d2dContext->DrawText(item.key, static_cast<UINT32>(wcslen(item.key)), m_formatKeycap.Get(), kRect, m_brushText.Get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+
+            D2D1_RECT_F dRect = D2D1::RectF(cx + keycapW + 8.0f * m_dpiScale, cy, cx + colW, cy + rowH - 4.0f * m_dpiScale);
+            m_brushTextMuted->SetColor(D2D1::ColorF(0xcbd5e1));
+            m_d2dContext->DrawText(item.desc, static_cast<UINT32>(wcslen(item.desc)), m_formatKeyDesc.Get(), dRect, m_brushTextMuted.Get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+
+            cy += rowH;
+        }
+        cy += 8.0f * m_dpiScale;
+    };
+
+    for (size_t c = 0; c < 3; ++c) {
+        float cx = cardX + headerPad + c * (colW + colGap);
+        float cy = startY;
+        for (const auto& sec : columns[c]) {
+            DrawSection(sec, cx, cy);
+        }
+    }
+
+    // Footer
+    float footerY = cardY + cardH - 32.0f * m_dpiScale;
+    m_brushBorder->SetColor(D2D1::ColorF(0x27272a, 1.0f));
+    m_d2dContext->DrawLine(D2D1::Point2F(cardX + headerPad, footerY), D2D1::Point2F(cardX + cardW - headerPad, footerY), m_brushBorder.Get(), 1.0f);
+
+    const wchar_t footer[] = L"Press F1 or Esc or click outside to dismiss \x2022 Zero Runtime Dependencies";
+    D2D1_RECT_F footRect = D2D1::RectF(cardX + headerPad, footerY + 6.0f * m_dpiScale, cardX + cardW - headerPad, footerY + 26.0f * m_dpiScale);
+    m_brushTextMuted->SetColor(D2D1::ColorF(0x64748b));
+    m_d2dContext->DrawText(footer, static_cast<UINT32>(wcslen(footer)), m_formatKeyDesc.Get(), footRect, m_brushTextMuted.Get());
+}
+

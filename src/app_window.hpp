@@ -28,6 +28,7 @@ private:
     POINT m_lastPanPt = { 0, 0 };
     bool m_isPanning = false;
     bool m_showExif = false;
+    bool m_showHelp = false;
     bool m_isFullscreen = false;
     WINDOWPLACEMENT m_savedPlacement = { sizeof(WINDOWPLACEMENT) };
 
@@ -38,6 +39,7 @@ private:
     void Invalidate();
     void UpdateWindowTitle();
     void ToggleFullscreen();
+    void ToggleHelp();
     void OpenFileDialog();
     void DeleteCurrentFile();
     void ShowContextMenu(int x, int y);
