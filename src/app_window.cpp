@@ -110,7 +110,27 @@ void AppWindow::UpdateWindowTitle() {
 
         title += meta.fileName + L" (" + std::to_wstring(meta.width) + L"×" + std::to_wstring(meta.height) + L")";
 
-        int zoomPercent = static_cast<int>(tab->zoom * 100.0f + 0.5f);
+        float currentZoom = tab->zoom;
+        if (tab->isFitToWindow && m_hWnd) {
+            RECT rc;
+            if (GetClientRect(m_hWnd, &rc)) {
+                float tabStripHeight = m_tabManager.ShouldShowTabs() ? m_renderer.GetTabStripHeight() : 0.0f;
+                float vpW = static_cast<float>(rc.right - rc.left);
+                float vpH = static_cast<float>(rc.bottom - rc.top) - tabStripHeight;
+                bool isRotated90 = (tab->rotationDegrees == 90 || tab->rotationDegrees == 270);
+                float visualW = isRotated90 ? static_cast<float>(meta.height) : static_cast<float>(meta.width);
+                float visualH = isRotated90 ? static_cast<float>(meta.width) : static_cast<float>(meta.height);
+                if (visualW > 0.0f && visualH > 0.0f && vpW > 0.0f && vpH > 0.0f) {
+                    float pad = 24.0f * m_renderer.GetDpiScale();
+                    float availW = std::max(10.0f, vpW - pad);
+                    float availH = std::max(10.0f, vpH - pad);
+                    currentZoom = std::min(availW / visualW, availH / visualH);
+                    tab->zoom = currentZoom;
+                }
+            }
+        }
+
+        int zoomPercent = static_cast<int>(currentZoom * 100.0f + 0.5f);
         title += L" - " + std::to_wstring(zoomPercent) + L"%";
 
         if (tab->rotationDegrees != 0) {
@@ -424,6 +444,7 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
             UINT w = LOWORD(lParam);
             UINT h = HIWORD(lParam);
             m_renderer.Resize(w, h);
+            UpdateWindowTitle();
             Invalidate();
             return 0;
         }

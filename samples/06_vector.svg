@@ -1,22 +1,56 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="800" height="600">
   <defs>
-    <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0f172a;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1e293b;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="lensGrad" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" style="stop-color:#3b82f6;stop-opacity:1" />
       <stop offset="100%" style="stop-color:#8b5cf6;stop-opacity:1" />
     </linearGradient>
-    <linearGradient id="grad2" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" style="stop-color:#10b981;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#06b6d4;stop-opacity:1" />
+    <linearGradient id="starGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#fbbf24;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#d97706;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="ribbonGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#0284c7;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#06b6d4;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#0284c7;stop-opacity:1" />
     </linearGradient>
   </defs>
-  <rect width="100%" height="100%" fill="#1e293b" />
-  <circle cx="400" cy="300" r="180" fill="url(#grad1)" />
-  <rect x="250" y="200" width="300" height="200" rx="20" fill="url(#grad2)" opacity="0.85" />
-  <polygon points="400,160 480,320 320,320" fill="#f59e0b" opacity="0.9" />
-  <text x="400" y="460" font-family="Segoe UI, sans-serif" font-size="28" font-weight="bold" fill="#ffffff" text-anchor="middle">
-    LightPhotoViewer Native SVG Vector Support
-  </text>
-  <text x="400" y="500" font-family="Segoe UI, sans-serif" font-size="18" fill="#94a3b8" text-anchor="middle">
-    Direct2D ID2D1SvgDocument Hardware Accelerated
-  </text>
+
+  <!-- Background -->
+  <rect width="100%" height="100%" fill="url(#bgGrad)" />
+
+  <!-- Camera Top Flash / Viewfinder -->
+  <rect x="340" y="85" width="120" height="42" rx="8" fill="#334155" stroke="#64748b" stroke-width="3" />
+  <circle cx="365" cy="106" r="8" fill="#f59e0b" />
+  <rect x="420" y="98" width="24" height="16" rx="4" fill="#64748b" />
+
+  <!-- Main Camera Chassis -->
+  <rect x="180" y="125" width="440" height="320" rx="28" fill="#1e293b" stroke="#38bdf8" stroke-width="4" />
+  <rect x="205" y="160" width="24" height="250" rx="8" fill="#0f172a" />
+
+  <!-- Lens Outer and Inner Rings -->
+  <circle cx="410" cy="285" r="115" fill="#0f172a" stroke="#6366f1" stroke-width="8" />
+  <circle cx="410" cy="285" r="95" fill="#1e1e2e" stroke="#06b6d4" stroke-width="4" />
+  <circle cx="410" cy="285" r="75" fill="url(#lensGrad)" />
+
+  <!-- Aperture Hexagon -->
+  <polygon points="410,235 445,260 445,310 410,335 375,310 375,260" fill="#0f172a" opacity="0.65" />
+
+  <!-- Lens Glass Glare Reflection -->
+  <ellipse cx="385" cy="260" rx="26" ry="14" fill="#ffffff" opacity="0.3" transform="rotate(-35 385 260)" />
+
+  <!-- Decorative Badge Ribbon -->
+  <polygon points="160,475 640,475 610,520 640,565 160,565 190,520" fill="url(#ribbonGrad)" stroke="#38bdf8" stroke-width="2" />
+
+  <!-- Left Star -->
+  <polygon points="280,500 286,517 305,517 289,528 295,545 280,534 265,545 271,528 255,517 274,517" fill="#ffffff" opacity="0.9" />
+
+  <!-- Center Gold Star -->
+  <polygon points="400,485 409,511 437,511 414,527 423,553 400,537 377,553 386,527 363,511 391,511" fill="url(#starGrad)" />
+
+  <!-- Right Star -->
+  <polygon points="520,500 526,517 545,517 529,528 535,545 520,534 505,545 511,528 495,517 514,517" fill="#ffffff" opacity="0.9" />
 </svg>

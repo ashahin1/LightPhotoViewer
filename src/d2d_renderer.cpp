@@ -625,7 +625,10 @@ void D2DRenderer::RenderImageCanvas(TabItem* tab, float viewportTop, float viewp
                 }
             }
             if (tab->svgDocument) {
+                D2D1::Matrix3x2F svgTransform = D2D1::Matrix3x2F::Translation(-imgW / 2.0f, -imgH / 2.0f) * transform;
+                m_d2dContext->SetTransform(svgTransform);
                 ctx5->DrawSvgDocument(tab->svgDocument.Get());
+                m_d2dContext->SetTransform(transform);
             }
         }
     } else {
