@@ -56,12 +56,11 @@ jobs:
           $hashExe = (Get-FileHash "bin\LightPhotoViewer.exe" -Algorithm SHA256).Hash
           $hashZip = (Get-FileHash $zipName -Algorithm SHA256).Hash
 
-          $checksumContent = @"
-LightPhotoViewer $tag SHA-256 Checksums:
-$hashExe  LightPhotoViewer.exe
-$hashZip  $zipName
-"@
-          Set-Content -Path "checksums.txt" -Value $checksumContent
+          @(
+            "LightPhotoViewer $tag SHA-256 Checksums:",
+            "$hashExe  LightPhotoViewer.exe",
+            "$hashZip  $zipName"
+          ) | Set-Content -Path "checksums.txt"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
