@@ -1,0 +1,55 @@
+name: Build LightPhotoViewer
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Native Windows Executable
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup MSVC Toolchain
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Compile LightPhotoViewer
+        shell: powershell
+        run: |
+          powershell -ExecutionPolicy Bypass -File .\build.ps1 -Rebuild
+
+      - name: Verify Binary Output & Size
+        shell: powershell
+        run: |
+          if (-not (Test-Path "bin\LightPhotoViewer.exe")) {
+            Write-Error "Binary bin\LightPhotoViewer.exe was not generated!"
+            exit 1
+          }
+          $item = Get-Item "bin\LightPhotoViewer.exe"
+          $sizeKB = [math]::Round($item.Length / 1KB, 1)
+          Write-Host ("Build successful. Binary size: {0} KB ({1} bytes)" -f $sizeKB, $item.Length)
+          if ($item.Length -gt 500 * 1024) {
+            Write-Error "Binary size exceeds strict 500 KB budget limit!"
+            exit 1
+          }
+          Write-Host "Binary size check PASSED! (< 500 KB)" -ForegroundColor Green
+
+      - name: Run Automated Image Format Test Suite
+        shell: powershell
+        run: |
+          powershell -ExecutionPolicy Bypass -File .\tools\test_all.ps1
+
+      - name: Upload Standalone Executable Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LightPhotoViewer-Windows-x64
+          path: bin\LightPhotoViewer.exe
+          if-no-files-found: error

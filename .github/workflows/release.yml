@@ -1,0 +1,76 @@
+name: Publish GitHub Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release Tag (e.g. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+jobs:
+  release:
+    name: Build & Publish Release
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup MSVC Toolchain
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Compile LightPhotoViewer
+        shell: powershell
+        run: |
+          powershell -ExecutionPolicy Bypass -File .\build.ps1 -Rebuild
+
+      - name: Run Test Suite Verification
+        shell: powershell
+        run: |
+          powershell -ExecutionPolicy Bypass -File .\tools\test_all.ps1
+
+      - name: Package Release Assets & Compute Checksums
+        shell: powershell
+        run: |
+          $tag = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } else { "${{ github.event.inputs.tag_name }}" }
+          if (-not $tag) { $tag = "v1.0.0" }
+
+          # Prepare zip payload
+          New-Item -ItemType Directory -Path "dist" -Force | Out-Null
+          Copy-Item "bin\LightPhotoViewer.exe" "dist\"
+          Copy-Item "README.md" "dist\"
+          Copy-Item "LICENSE" "dist\"
+
+          $zipName = "LightPhotoViewer-$tag-windows-x64.zip"
+          Compress-Archive -Path "dist\*" -DestinationPath $zipName -Force
+
+          # Calculate SHA-256 hashes
+          $hashExe = (Get-FileHash "bin\LightPhotoViewer.exe" -Algorithm SHA256).Hash
+          $hashZip = (Get-FileHash $zipName -Algorithm SHA256).Hash
+
+          $checksumContent = @"
+LightPhotoViewer $tag SHA-256 Checksums:
+$hashExe  LightPhotoViewer.exe
+$hashZip  $zipName
+"@
+          Set-Content -Path "checksums.txt" -Value $checksumContent
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: LightPhotoViewer ${{ github.ref_name || github.event.inputs.tag_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            bin/LightPhotoViewer.exe
+            LightPhotoViewer-*.zip
+            checksums.txt

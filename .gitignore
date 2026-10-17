@@ -1,8 +1,32 @@
-bin/obj/
+# Build output & binaries
+bin/
+dist/
+*.exe
 *.obj
-*.pch
 *.res
+*.pch
 *.pdb
 *.ilk
-*.suo
+*.lib
+*.exp
+*.zip
+*.tmp*
+
+# MSVC portable toolchain (if downloaded locally)
+tools/msvc/
+
+# Python cache & virtual environments
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Diagnostic logs & scratch files
+scratch/
+*.log
+
+# IDE & Editor files
 .vs/
+.vscode/
+*.user
+*.suo
