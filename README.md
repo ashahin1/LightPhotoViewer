@@ -7,7 +7,7 @@
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://isocpp.org/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-0078D6.svg)](https://www.microsoft.com/windows)
 [![Release](https://img.shields.io/github/v/release/ashahin1/LightPhotoViewer?color=blue)](https://github.com/ashahin1/LightPhotoViewer/releases)
-[![Binary Size](https://img.shields.io/badge/Binary%20Size-434%20KB-brightgreen.svg)]()
+[![Binary Size](https://img.shields.io/badge/Binary%20Size-437%20KB-brightgreen.svg)]()
 [![Private RAM](https://img.shields.io/badge/Private%20RAM-35--50%20MB-success.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -72,8 +72,13 @@ Measured on Windows 11 (64-bit) with cold execution and hardware performance cou
   * Press **`F1`** anytime to display an in-canvas categorized Direct2D shortcuts dialog.
 * **In-Canvas Print Preview & Native Spooling (`Ctrl+P`)**:
   * Live hardware-accelerated WYSIWYG virtual paper sheet preview directly on the Direct2D canvas.
-  * Instant interactive controls for Printer, Paper Size presets (`A4`, `Letter`, `Legal`, `A3`, `A5`, `4×6 in`, `5×7 in`, `8×10 in`), Orientation (`Portrait` / `Landscape`), Scale modes (`Fit`, `Fill (Crop)`, `1:1 Actual Size`), Margins (`Normal 0.5"`, `Narrow 0.25"`, `Borderless`), and Copies (`1`–`99`).
+  * Instant interactive controls with custom popover dropdowns for Printers and Paper Size presets (`A4`, `Letter`, `Legal`, `A3`, `A5`, `4×6 in`, `5×7 in`, `8×10 in`).
+  * Interactive Copies box (`1`–`99`) with click-to-type numeric keyboard entry and `−` / `+` steppers.
+  * Multi-frame / Animated GIF preview freeze with sidebar frame stepper (`◀ Frame X of Y ▶`) and `[` / `]` keyboard cycling for WYSIWYG still-frame printing.
   * Direct high-resolution Win32 spooler printing with transparent backgrounds cleanly composited over pure white and vector SVGs rasterized via Direct2D offscreen GPU buffers.
+  * Strict modal keyboard isolation preventing background folder navigation while printing.
+* **System-Aware Theme Synchronization**:
+  * Native Windows 11/10 dark mode integration via `uxtheme.dll`: right-click context menu and DWM title bar automatically synchronize with Windows Dark and Light Mode preferences dynamically.
 * **EXIF & Metadata Inspection**:
   * Press **`I`** to toggle image metadata (dimensions, format, file size, camera, exposure, ISO).
 * **Zero-Admin Shell Associations**:
@@ -116,6 +121,7 @@ Measured on Windows 11 (64-bit) with cold execution and hardware performance cou
 | :--- | :--- |
 | `Ctrl + O` | Open image file dialog |
 | `Ctrl + P` | Open Print Preview / Execute print job |
+| `[` / `]` | Previous / Next animation frame (in Print Preview) |
 | `Ctrl + W` | Close active tab |
 | `Ctrl + Shift + T` | Reopen recently closed tab |
 | `Ctrl + Tab` | Next tab |
