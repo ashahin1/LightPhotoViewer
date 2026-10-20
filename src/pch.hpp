@@ -8,6 +8,7 @@
 #include <windowsx.h>
 #include <commctrl.h>
 #include <commdlg.h>
+#include <winspool.h>
 #include <shellapi.h>
 #include <shlobj.h>
 #include <shlwapi.h>

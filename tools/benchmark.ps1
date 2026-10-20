@@ -52,7 +52,7 @@ foreach ($line in $dumpbinOut) {
     }
 }
 Write-Host "  Imported DLLs ($($dlls.Count)): $($dlls -join ', ')"
-$nonSystem = $dlls | Where-Object { $_ -notmatch "(KERNEL32|USER32|GDI32|COMCTL32|COMDLG32|SHELL32|SHLWAPI|DWMAPI|UXTHEME|OLE32|OLEAUT32|ADVAPI32|D3D11|D2D1|DWRITE|DXGI|windowscodecs)\.dll" }
+$nonSystem = $dlls | Where-Object { $_ -notmatch "(KERNEL32|USER32|GDI32|COMCTL32|COMDLG32|WINSPOOL|SHELL32|SHLWAPI|DWMAPI|UXTHEME|OLE32|OLEAUT32|ADVAPI32|D3D11|D2D1|DWRITE|DXGI|windowscodecs)\.(dll|drv)" }
 if ($nonSystem.Count -eq 0) {
     Write-Host "  Result:      PASS (Zero external dependencies, 100% built-in OS libraries)" -ForegroundColor Green
 } else {

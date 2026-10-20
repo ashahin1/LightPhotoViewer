@@ -215,6 +215,7 @@ if ($needLink) {
         "gdi32.lib",
         "comctl32.lib",
         "comdlg32.lib",
+        "winspool.lib",
         "shell32.lib",
         "shlwapi.lib",
         "dwmapi.lib",

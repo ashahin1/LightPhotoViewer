@@ -7,7 +7,7 @@
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://isocpp.org/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-0078D6.svg)](https://www.microsoft.com/windows)
 [![Release](https://img.shields.io/github/v/release/ashahin1/LightPhotoViewer?color=blue)](https://github.com/ashahin1/LightPhotoViewer/releases)
-[![Binary Size](https://img.shields.io/badge/Binary%20Size-403%20KB-brightgreen.svg)]()
+[![Binary Size](https://img.shields.io/badge/Binary%20Size-426%20KB-brightgreen.svg)]()
 [![Private RAM](https://img.shields.io/badge/Private%20RAM-35--50%20MB-success.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -24,7 +24,7 @@ Measured on Windows 11 (64-bit) with cold execution and hardware performance cou
 
 | Metric | LightPhotoViewer | Windows Photos | ImageGlass | IrfanView |
 | :--- | :---: | :---: | :---: | :---: |
-| **Standalone Binary Size** | **403 KB** | ~150 MB | ~65 MB | ~3 MB |
+| **Standalone Binary Size** | **426 KB** | ~150 MB | ~65 MB | ~3 MB |
 | **External Runtime DLLs** | **0** (Native OS only) | 40+ | 30+ | 0–10 |
 | **Cold Startup Latency** | **~220 ms** | ~1,800 ms | ~900 ms | ~120 ms |
 | **Private RAM (4K Image)** | **~35–50 MB** | ~180 MB | ~110 MB | ~40 MB |
@@ -70,6 +70,10 @@ Measured on Windows 11 (64-bit) with cold execution and hardware performance cou
   * Persistent recent files list on empty state with keyboard shortcuts `1`–`6` and direct click opening.
 * **Interactive `F1` Shortcut Help Overlay**:
   * Press **`F1`** anytime to display an in-canvas categorized Direct2D shortcuts dialog.
+* **In-Canvas Print Preview & Native Spooling (`Ctrl+P`)**:
+  * Live hardware-accelerated WYSIWYG virtual paper sheet preview directly on the Direct2D canvas.
+  * Instant interactive controls for Printer, Paper Size presets (`A4`, `Letter`, `Legal`, `A3`, `A5`, `4×6 in`, `5×7 in`, `8×10 in`), Orientation (`Portrait` / `Landscape`), Scale modes (`Fit`, `Fill (Crop)`, `1:1 Actual Size`), Margins (`Normal 0.5"`, `Narrow 0.25"`, `Borderless`), and Copies (`1`–`99`).
+  * Direct high-resolution Win32 spooler printing with transparent backgrounds cleanly composited over pure white and vector SVGs rasterized via Direct2D offscreen GPU buffers.
 * **EXIF & Metadata Inspection**:
   * Press **`I`** to toggle image metadata (dimensions, format, file size, camera, exposure, ISO).
 * **Zero-Admin Shell Associations**:
@@ -111,6 +115,7 @@ Measured on Windows 11 (64-bit) with cold execution and hardware performance cou
 | Shortcut | Action |
 | :--- | :--- |
 | `Ctrl + O` | Open image file dialog |
+| `Ctrl + P` | Open Print Preview / Execute print job |
 | `Ctrl + W` | Close active tab |
 | `Ctrl + Shift + T` | Reopen recently closed tab |
 | `Ctrl + Tab` | Next tab |

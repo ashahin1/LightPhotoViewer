@@ -241,6 +241,9 @@ void AppWindow::ShowContextMenu(int x, int y) {
 
     AppendMenuW(hMenu, MF_STRING, IDM_FILE_OPEN, L"Open Image...\tCtrl+O");
     AppendMenuW(hMenu, MF_STRING, IDM_FILE_REOPEN_TAB, L"Reopen Closed Tab\tCtrl+Shift+T");
+    if (hasDoc) {
+        AppendMenuW(hMenu, MF_STRING, IDM_FILE_PRINT, L"Print...\tCtrl+P");
+    }
     AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
 
     if (hasDoc) {
@@ -479,7 +482,7 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         case WM_PAINT: {
             PAINTSTRUCT ps;
             BeginPaint(m_hWnd, &ps);
-            m_renderer.Render(m_tabManager, m_hudAlpha, m_showExif, m_showHelp, m_isSlideshow, m_mousePt);
+            m_renderer.Render(m_tabManager, m_hudAlpha, m_showExif, m_showHelp, m_isSlideshow, m_printSettings, m_mousePt);
             EndPaint(m_hWnd, &ps);
             return 0;
         }
@@ -523,6 +526,22 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
 
         case WM_LBUTTONDOWN: {
             POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+
+            // If Print Preview is active, handle overlay controls or backdrop click
+            if (m_printSettings.isActive) {
+                PrintUiId printId = m_renderer.HitTestPrintUi(pt);
+                if (printId == PrintUiId::CloseModal) {
+                    ClosePrintPreview();
+                } else if (printId == PrintUiId::CardBody) {
+                    // Clicked on card body without specific action
+                } else if (printId != PrintUiId::None) {
+                    HandlePrintUiClick(printId);
+                } else {
+                    // Clicked on backdrop outside card
+                    ClosePrintPreview();
+                }
+                return 0;
+            }
 
             // If Help Overlay is active, handle close button or backdrop click
             if (m_showHelp) {
@@ -655,6 +674,11 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
             if (ctrlDown) {
                 switch (wParam) {
                     case 'O': OpenFileDialog(); return 0;
+                    case 'P': {
+                        if (m_printSettings.isActive) ExecutePrintJob();
+                        else OpenPrintPreview();
+                        return 0;
+                    }
                     case 'W': {
                         if (m_tabManager.GetActiveIndex() >= 0) {
                             m_tabManager.CloseTab(m_tabManager.GetActiveIndex());
@@ -808,7 +832,14 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
 
                 case 'F':
                 case VK_F11:
+                    ToggleFullscreen();
+                    return 0;
+
                 case VK_RETURN:
+                    if (m_printSettings.isActive) {
+                        ExecutePrintJob();
+                        return 0;
+                    }
                     ToggleFullscreen();
                     return 0;
 
@@ -851,6 +882,10 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
                     return 0;
 
                 case VK_ESCAPE:
+                    if (m_printSettings.isActive) {
+                        ClosePrintPreview();
+                        return 0;
+                    }
                     if (m_showHelp) {
                         m_showHelp = false;
                         Invalidate();
@@ -872,6 +907,7 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
             switch (LOWORD(wParam)) {
                 case IDM_FILE_OPEN:       OpenFileDialog(); return 0;
                 case IDM_FILE_REOPEN_TAB: ReopenClosedTab(); return 0;
+                case IDM_FILE_PRINT:      OpenPrintPreview(); return 0;
                 case IDM_NAV_NEXT:        NextImage(); return 0;
                 case IDM_NAV_PREV:        PrevImage(); return 0;
                 case IDM_VIEW_ZOOM_FIT:   ZoomFit(); return 0;
@@ -1090,4 +1126,426 @@ void AppWindow::UnregisterShellAssociations() {
     }
 
     SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
+}
+
+void AppWindow::OpenPrintPreview() {
+    TabItem* tab = m_tabManager.GetActiveTab();
+    if (!tab || !tab->document || !tab->document->isValid) {
+        return;
+    }
+
+    // 1. Enumerate available printers
+    m_printSettings.printers.clear();
+    DWORD flags = PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS;
+    DWORD bytesNeeded = 0;
+    DWORD numPrinters = 0;
+    EnumPrintersW(flags, nullptr, 2, nullptr, 0, &bytesNeeded, &numPrinters);
+    if (bytesNeeded > 0) {
+        std::vector<BYTE> buffer(bytesNeeded);
+        if (EnumPrintersW(flags, nullptr, 2, buffer.data(), bytesNeeded, &bytesNeeded, &numPrinters)) {
+            PRINTER_INFO_2W* pInfo = reinterpret_cast<PRINTER_INFO_2W*>(buffer.data());
+            for (DWORD i = 0; i < numPrinters; ++i) {
+                if (pInfo[i].pPrinterName) {
+                    m_printSettings.printers.push_back(pInfo[i].pPrinterName);
+                }
+            }
+        }
+    }
+    if (m_printSettings.printers.empty()) {
+        m_printSettings.printers.push_back(L"Microsoft Print to PDF");
+    }
+
+    // 2. Select system default printer
+    wchar_t defaultPrinter[256] = {};
+    DWORD size = 256;
+    m_printSettings.selectedPrinterIdx = 0;
+    if (GetDefaultPrinterW(defaultPrinter, &size)) {
+        for (size_t i = 0; i < m_printSettings.printers.size(); ++i) {
+            if (_wcsicmp(m_printSettings.printers[i].c_str(), defaultPrinter) == 0) {
+                m_printSettings.selectedPrinterIdx = static_cast<int>(i);
+                break;
+            }
+        }
+    }
+
+    // 3. Auto-detect orientation to maximize initial fit
+    bool isRot90 = (tab->rotationDegrees == 90 || tab->rotationDegrees == 270);
+    float vw = static_cast<float>(isRot90 ? tab->document->GetHeight() : tab->document->GetWidth());
+    float vh = static_cast<float>(isRot90 ? tab->document->GetWidth() : tab->document->GetHeight());
+    m_printSettings.orientation = (vw > vh) ? PrintOrientation::Landscape : PrintOrientation::Portrait;
+
+    m_printSettings.isActive = true;
+    m_showHelp = false;
+    Invalidate();
+}
+
+void AppWindow::ClosePrintPreview() {
+    m_printSettings.isActive = false;
+    Invalidate();
+}
+
+void AppWindow::HandlePrintUiClick(PrintUiId id) {
+    switch (id) {
+        case PrintUiId::CloseModal:
+            ClosePrintPreview();
+            break;
+        case PrintUiId::PrinterPrev:
+            if (!m_printSettings.printers.empty()) {
+                int count = static_cast<int>(m_printSettings.printers.size());
+                m_printSettings.selectedPrinterIdx = (m_printSettings.selectedPrinterIdx - 1 + count) % count;
+                Invalidate();
+            }
+            break;
+        case PrintUiId::PrinterNext:
+            if (!m_printSettings.printers.empty()) {
+                int count = static_cast<int>(m_printSettings.printers.size());
+                m_printSettings.selectedPrinterIdx = (m_printSettings.selectedPrinterIdx + 1) % count;
+                Invalidate();
+            }
+            break;
+        case PrintUiId::PaperPrev: {
+            int count = static_cast<int>(D2DRenderer::GetPaperPresets().size());
+            m_printSettings.paperPresetIdx = (m_printSettings.paperPresetIdx - 1 + count) % count;
+            Invalidate();
+            break;
+        }
+        case PrintUiId::PaperNext: {
+            int count = static_cast<int>(D2DRenderer::GetPaperPresets().size());
+            m_printSettings.paperPresetIdx = (m_printSettings.paperPresetIdx + 1) % count;
+            Invalidate();
+            break;
+        }
+        case PrintUiId::OrientPortrait:
+            m_printSettings.orientation = PrintOrientation::Portrait;
+            Invalidate();
+            break;
+        case PrintUiId::OrientLandscape:
+            m_printSettings.orientation = PrintOrientation::Landscape;
+            Invalidate();
+            break;
+        case PrintUiId::ScaleFit:
+            m_printSettings.scaleMode = PrintScaleMode::FitToPage;
+            Invalidate();
+            break;
+        case PrintUiId::ScaleFill:
+            m_printSettings.scaleMode = PrintScaleMode::FillPage;
+            Invalidate();
+            break;
+        case PrintUiId::ScaleActual:
+            m_printSettings.scaleMode = PrintScaleMode::ActualSize;
+            Invalidate();
+            break;
+        case PrintUiId::MarginNormal:
+            m_printSettings.marginMode = PrintMarginMode::Normal;
+            Invalidate();
+            break;
+        case PrintUiId::MarginNarrow:
+            m_printSettings.marginMode = PrintMarginMode::Narrow;
+            Invalidate();
+            break;
+        case PrintUiId::MarginNone:
+            m_printSettings.marginMode = PrintMarginMode::Borderless;
+            Invalidate();
+            break;
+        case PrintUiId::CopiesMinus:
+            if (m_printSettings.copies > 1) {
+                m_printSettings.copies--;
+                Invalidate();
+            }
+            break;
+        case PrintUiId::CopiesPlus:
+            if (m_printSettings.copies < 99) {
+                m_printSettings.copies++;
+                Invalidate();
+            }
+            break;
+        case PrintUiId::SystemDialog:
+            OpenSystemPrintDialog();
+            break;
+        case PrintUiId::ExecutePrint:
+            ExecutePrintJob();
+            break;
+        default:
+            break;
+    }
+}
+
+void AppWindow::OpenSystemPrintDialog() {
+    PRINTDLGW pd = { sizeof(PRINTDLGW) };
+    pd.hwndOwner = m_hWnd;
+    pd.Flags = PD_RETURNDC | PD_USEDEVMODECOPIESANDCOLLATE;
+    pd.nCopies = static_cast<WORD>(m_printSettings.copies);
+
+    if (PrintDlgW(&pd)) {
+        if (pd.hDC) {
+            SpoolPageToHdc(pd.hDC);
+            DeleteDC(pd.hDC);
+        }
+        if (pd.hDevMode) GlobalFree(pd.hDevMode);
+        if (pd.hDevNames) GlobalFree(pd.hDevNames);
+        ClosePrintPreview();
+    }
+}
+
+void AppWindow::ExecutePrintJob() {
+    TabItem* tab = m_tabManager.GetActiveTab();
+    if (!tab || !tab->document || !tab->document->isValid) return;
+
+    if (m_printSettings.printers.empty()) {
+        MessageBoxW(m_hWnd, L"No printers available on this system.", L"Print Error", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    const std::wstring& printerName = m_printSettings.printers[m_printSettings.selectedPrinterIdx % m_printSettings.printers.size()];
+
+    HANDLE hPrinter = nullptr;
+    if (!OpenPrinterW(const_cast<LPWSTR>(printerName.c_str()), &hPrinter, nullptr)) {
+        MessageBoxW(m_hWnd, (L"Unable to open printer:\n" + printerName).c_str(), L"Print Error", MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    LONG dmSize = DocumentPropertiesW(m_hWnd, hPrinter, const_cast<LPWSTR>(printerName.c_str()), nullptr, nullptr, 0);
+    if (dmSize <= 0) {
+        ClosePrinter(hPrinter);
+        MessageBoxW(m_hWnd, L"Failed to query printer properties.", L"Print Error", MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    std::vector<BYTE> devModeBuffer(dmSize);
+    DEVMODEW* pDevMode = reinterpret_cast<DEVMODEW*>(devModeBuffer.data());
+    if (DocumentPropertiesW(m_hWnd, hPrinter, const_cast<LPWSTR>(printerName.c_str()), pDevMode, nullptr, DM_OUT_BUFFER) < 0) {
+        ClosePrinter(hPrinter);
+        MessageBoxW(m_hWnd, L"Failed to initialize DEVMODE structure.", L"Print Error", MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    // Configure DEVMODE with our PrintSettings
+    pDevMode->dmFields |= DM_ORIENTATION | DM_COPIES;
+    pDevMode->dmOrientation = (m_printSettings.orientation == PrintOrientation::Landscape) ? DMORIENT_LANDSCAPE : DMORIENT_PORTRAIT;
+    pDevMode->dmCopies = static_cast<short>(std::clamp(m_printSettings.copies, 1, 99));
+
+    const auto& presets = D2DRenderer::GetPaperPresets();
+    int pIdx = std::clamp(m_printSettings.paperPresetIdx, 0, static_cast<int>(presets.size() - 1));
+    if (presets[pIdx].dmPaperCode != 0) {
+        pDevMode->dmFields |= DM_PAPERSIZE;
+        pDevMode->dmPaperSize = presets[pIdx].dmPaperCode;
+    } else {
+        pDevMode->dmFields |= DM_PAPERLENGTH | DM_PAPERWIDTH;
+        pDevMode->dmPaperWidth = static_cast<short>(presets[pIdx].widthMm * 10.0f);
+        pDevMode->dmPaperLength = static_cast<short>(presets[pIdx].heightMm * 10.0f);
+    }
+
+    DocumentPropertiesW(m_hWnd, hPrinter, const_cast<LPWSTR>(printerName.c_str()), pDevMode, pDevMode, DM_IN_BUFFER | DM_OUT_BUFFER);
+    ClosePrinter(hPrinter);
+
+    HDC hdc = CreateDCW(L"WINSPOOL", printerName.c_str(), nullptr, pDevMode);
+    if (!hdc) {
+        MessageBoxW(m_hWnd, (L"Failed to create printer device context for:\n" + printerName).c_str(), L"Print Error", MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    SpoolPageToHdc(hdc);
+    DeleteDC(hdc);
+    ClosePrintPreview();
+}
+
+void AppWindow::SpoolPageToHdc(HDC hdc) {
+    TabItem* tab = m_tabManager.GetActiveTab();
+    if (!tab || !tab->document || !tab->document->isValid || !hdc) return;
+
+    int dpiX = GetDeviceCaps(hdc, LOGPIXELSX);
+    int dpiY = GetDeviceCaps(hdc, LOGPIXELSY);
+    int printW = GetDeviceCaps(hdc, HORZRES);
+    int printH = GetDeviceCaps(hdc, VERTRES);
+    int physW = GetDeviceCaps(hdc, PHYSICALWIDTH);
+    int physH = GetDeviceCaps(hdc, PHYSICALHEIGHT);
+    int offX = GetDeviceCaps(hdc, PHYSICALOFFSETX);
+    int offY = GetDeviceCaps(hdc, PHYSICALOFFSETY);
+
+    if (printW <= 0 || printH <= 0 || dpiX <= 0 || dpiY <= 0) return;
+
+    float marginIn = 0.5f; // Normal: 0.5 in
+    if (m_printSettings.marginMode == PrintMarginMode::Narrow) marginIn = 0.25f;
+    else if (m_printSettings.marginMode == PrintMarginMode::Borderless) marginIn = 0.0f;
+
+    int mPixX = static_cast<int>(marginIn * dpiX);
+    int mPixY = static_cast<int>(marginIn * dpiY);
+
+    int targetLeft = std::max(0, mPixX - offX);
+    int targetTop = std::max(0, mPixY - offY);
+    int targetRight = std::min(printW, (physW > 0 ? physW : printW) - mPixX - offX);
+    int targetBottom = std::min(printH, (physH > 0 ? physH : printH) - mPixY - offY);
+
+    if (targetRight <= targetLeft || targetBottom <= targetTop) {
+        targetLeft = 0; targetTop = 0; targetRight = printW; targetBottom = printH;
+    }
+    int areaW = targetRight - targetLeft;
+    int areaH = targetBottom - targetTop;
+
+    // Prepare pixel data
+    UINT srcW = tab->document->GetWidth();
+    UINT srcH = tab->document->GetHeight();
+    if (srcW == 0 || srcH == 0) return;
+
+    bool isRot90 = (tab->rotationDegrees == 90 || tab->rotationDegrees == 270);
+    UINT outW = isRot90 ? srcH : srcW;
+    UINT outH = isRot90 ? srcW : srcH;
+
+    std::vector<uint32_t> dibPixels;
+
+    if (tab->document->metadata.isSvg && tab->svgDocument) {
+        // High-resolution rasterization of SVG to match print area (capped at 3000x3000 max to bound RAM)
+        float maxDim = 3000.0f;
+        float aspect = static_cast<float>(srcW) / static_cast<float>(srcH);
+        UINT rasterW = (aspect >= 1.0f) ? static_cast<UINT>(maxDim) : static_cast<UINT>(maxDim * aspect);
+        UINT rasterH = (aspect >= 1.0f) ? static_cast<UINT>(maxDim / aspect) : static_cast<UINT>(maxDim);
+        rasterW = std::clamp(rasterW, 100U, 4000U);
+        rasterH = std::clamp(rasterH, 100U, 4000U);
+
+        std::vector<uint32_t> svgPixels;
+        if (m_renderer.RasterizeSvgToPixels(tab->svgDocument.Get(), rasterW, rasterH, svgPixels)) {
+            srcW = rasterW;
+            srcH = rasterH;
+            outW = isRot90 ? srcH : srcW;
+            outH = isRot90 ? srcW : srcH;
+            dibPixels.resize(outW * outH);
+
+            for (UINT y = 0; y < outH; ++y) {
+                UINT visualY = outH - 1 - y; // Bottom-up
+                for (UINT x = 0; x < outW; ++x) {
+                    UINT ox = x;
+                    UINT oy = visualY;
+                    if (tab->flipH) ox = outW - 1 - ox;
+                    if (tab->flipV) oy = outH - 1 - oy;
+
+                    UINT sx = ox;
+                    UINT sy = oy;
+                    switch (tab->rotationDegrees) {
+                        case 90:  sx = oy; sy = srcH - 1 - ox; break;
+                        case 180: sx = srcW - 1 - ox; sy = srcH - 1 - oy; break;
+                        case 270: sx = srcW - 1 - oy; sy = ox; break;
+                        default:  break;
+                    }
+                    dibPixels[y * outW + x] = svgPixels[sy * srcW + sx];
+                }
+            }
+        }
+    }
+
+    if (dibPixels.empty()) {
+        const FrameData* fd = tab->document->GetFrame(tab->currentFrame);
+        if (!fd || !fd->bitmap) return;
+
+        std::vector<BYTE> srcBytes(srcW * srcH * 4);
+        WICRect rc = { 0, 0, static_cast<INT>(srcW), static_cast<INT>(srcH) };
+        if (FAILED(fd->bitmap->CopyPixels(&rc, srcW * 4, static_cast<UINT>(srcBytes.size()), srcBytes.data()))) {
+            return;
+        }
+
+        dibPixels.resize(outW * outH);
+        for (UINT y = 0; y < outH; ++y) {
+            UINT visualY = outH - 1 - y; // Bottom-up
+            for (UINT x = 0; x < outW; ++x) {
+                UINT ox = x;
+                UINT oy = visualY;
+                if (tab->flipH) ox = outW - 1 - ox;
+                if (tab->flipV) oy = outH - 1 - oy;
+
+                UINT sx = ox;
+                UINT sy = oy;
+                switch (tab->rotationDegrees) {
+                    case 90:  sx = oy; sy = srcH - 1 - ox; break;
+                    case 180: sx = srcW - 1 - ox; sy = srcH - 1 - oy; break;
+                    case 270: sx = srcW - 1 - oy; sy = ox; break;
+                    default:  break;
+                }
+
+                const BYTE* p = &srcBytes[(sy * srcW + sx) * 4];
+                BYTE b = p[0], g = p[1], r = p[2], a = p[3];
+                BYTE invA = 255 - a;
+                // Composite premultiplied pixels onto pure white background
+                BYTE dstB = b + invA;
+                BYTE dstG = g + invA;
+                BYTE dstR = r + invA;
+                dibPixels[y * outW + x] = (dstR << 16) | (dstG << 8) | dstB;
+            }
+        }
+    }
+
+    // Calculate Destination and Source Cropping
+    float visAspect = static_cast<float>(outW) / static_cast<float>(outH);
+    float areaAspect = static_cast<float>(areaW) / static_cast<float>(areaH);
+
+    int dstX = targetLeft;
+    int dstY = targetTop;
+    int dstW = areaW;
+    int dstH = areaH;
+
+    int srcCropX = 0;
+    int srcCropY = 0;
+    int srcCropW = outW;
+    int srcCropH = outH;
+
+    if (m_printSettings.scaleMode == PrintScaleMode::FitToPage) {
+        if (areaAspect > visAspect) {
+            dstH = areaH;
+            dstW = static_cast<int>(dstH * visAspect);
+        } else {
+            dstW = areaW;
+            dstH = static_cast<int>(dstW / visAspect);
+        }
+        dstX = targetLeft + (areaW - dstW) / 2;
+        dstY = targetTop + (areaH - dstH) / 2;
+    } else if (m_printSettings.scaleMode == PrintScaleMode::FillPage) {
+        if (areaAspect > visAspect) {
+            srcCropW = outW;
+            srcCropH = static_cast<int>(outW / areaAspect);
+            srcCropY = (outH - srcCropH) / 2;
+        } else {
+            srcCropH = outH;
+            srcCropW = static_cast<int>(outH * areaAspect);
+            srcCropX = (outW - srcCropW) / 2;
+        }
+        dstX = targetLeft;
+        dstY = targetTop;
+        dstW = areaW;
+        dstH = areaH;
+    } else { // ActualSize (1:1 physical size at 96 DPI)
+        dstW = static_cast<int>((static_cast<float>(outW) / 96.0f) * dpiX);
+        dstH = static_cast<int>((static_cast<float>(outH) / 96.0f) * dpiY);
+        dstX = targetLeft + (areaW - dstW) / 2;
+        dstY = targetTop + (areaH - dstH) / 2;
+    }
+
+    DOCINFOW di = { sizeof(DOCINFOW) };
+    std::wstring docTitle = L"LightPhotoViewer - " + tab->title;
+    di.lpszDocName = docTitle.c_str();
+
+    if (StartDocW(hdc, &di) > 0) {
+        if (StartPage(hdc) > 0) {
+            SetStretchBltMode(hdc, HALFTONE);
+            SetBrushOrgEx(hdc, 0, 0, nullptr);
+
+            BITMAPINFO bi = {};
+            bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+            bi.bmiHeader.biWidth = outW;
+            bi.bmiHeader.biHeight = outH; // Bottom-up
+            bi.bmiHeader.biPlanes = 1;
+            bi.bmiHeader.biBitCount = 32;
+            bi.bmiHeader.biCompression = BI_RGB;
+
+            StretchDIBits(
+                hdc,
+                dstX, dstY, dstW, dstH,
+                srcCropX, outH - (srcCropY + srcCropH), srcCropW, srcCropH,
+                dibPixels.data(),
+                &bi,
+                DIB_RGB_COLORS,
+                SRCCOPY
+            );
+
+            EndPage(hdc);
+        }
+        EndDoc(hdc);
+    }
 }

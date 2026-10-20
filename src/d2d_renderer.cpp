@@ -404,7 +404,7 @@ void D2DRenderer::DrawCheckerboard(D2D1_RECT_F rect) {
     }
 }
 
-void D2DRenderer::Render(TabManager& tabManager, float hudAlpha, bool showExif, bool showHelp, bool isSlideshow, POINT mousePt) {
+void D2DRenderer::Render(TabManager& tabManager, float hudAlpha, bool showExif, bool showHelp, bool isSlideshow, const PrintSettings& printSettings, POINT mousePt) {
     if (!CreateDeviceResources()) return;
 
     m_d2dContext->BeginDraw();
@@ -441,6 +441,14 @@ void D2DRenderer::Render(TabManager& tabManager, float hudAlpha, bool showExif, 
     } else {
         m_helpCardRect = { 0, 0, 0, 0 };
         m_helpCloseRect = { 0, 0, 0, 0 };
+    }
+
+    if (printSettings.isActive) {
+        RenderPrintPreview(activeTab, printSettings, mousePt);
+    } else {
+        m_printHits.clear();
+        m_printCardRect = { 0, 0, 0, 0 };
+        m_printCloseRect = { 0, 0, 0, 0 };
     }
 
     HRESULT hr = m_d2dContext->EndDraw();
@@ -952,6 +960,7 @@ void D2DRenderer::RenderHelpOverlay(POINT mousePt) {
             L"FILE & TABS",
             {
                 { L"Ctrl + O",       L"Open image..." },
+                { L"Ctrl + P",       L"Print image..." },
                 { L"Ctrl + W",       L"Close active tab" },
                 { L"Ctrl+Shift+T",   L"Reopen closed tab" },
                 { L"Ctrl + Tab",     L"Next tab" },
@@ -1141,4 +1150,479 @@ void D2DRenderer::RenderEmptyState(const TabManager& tabManager, POINT mousePt) 
 
     D2D1_RECT_F hRect = D2D1::RectF(cardX + 16.0f * m_dpiScale, curY + 12.0f * m_dpiScale, cardX + cardW - 16.0f * m_dpiScale, curY + cardH - 12.0f * m_dpiScale);
     m_d2dContext->DrawText(hints, static_cast<UINT32>(wcslen(hints)), m_formatInfo.Get(), hRect, m_brushTextMuted.Get());
+}
+
+const std::vector<PaperPreset>& D2DRenderer::GetPaperPresets() {
+    static const std::vector<PaperPreset> presets = {
+        { DMPAPER_A4,     L"A4 (210 × 297 mm)",     210.0f, 297.0f },
+        { DMPAPER_LETTER, L"Letter (8.5 × 11 in)",  215.9f, 279.4f },
+        { DMPAPER_LEGAL,  L"Legal (8.5 × 14 in)",   215.9f, 355.6f },
+        { DMPAPER_A3,     L"A3 (297 × 420 mm)",     297.0f, 420.0f },
+        { DMPAPER_A5,     L"A5 (148 × 210 mm)",     148.0f, 210.0f },
+        { 0,              L"4 × 6 in (Photo)",       101.6f, 152.4f },
+        { 0,              L"5 × 7 in (Photo)",       127.0f, 177.8f },
+        { 0,              L"8 × 10 in (Photo)",      203.2f, 254.0f },
+    };
+    return presets;
+}
+
+PrintUiId D2DRenderer::HitTestPrintUi(POINT pt) {
+    if (pt.x >= m_printCloseRect.left && pt.x <= m_printCloseRect.right &&
+        pt.y >= m_printCloseRect.top && pt.y <= m_printCloseRect.bottom) {
+        return PrintUiId::CloseModal;
+    }
+    for (const auto& item : m_printHits) {
+        if (pt.x >= item.rect.left && pt.x <= item.rect.right &&
+            pt.y >= item.rect.top && pt.y <= item.rect.bottom) {
+            return item.id;
+        }
+    }
+    if (pt.x >= m_printCardRect.left && pt.x <= m_printCardRect.right &&
+        pt.y >= m_printCardRect.top && pt.y <= m_printCardRect.bottom) {
+        return PrintUiId::CardBody;
+    }
+    return PrintUiId::None;
+}
+
+bool D2DRenderer::RasterizeSvgToPixels(ID2D1SvgDocument* svgDoc, UINT targetW, UINT targetH, std::vector<uint32_t>& outPixels) {
+    if (!svgDoc || targetW == 0 || targetH == 0 || !m_d3dDevice || !m_d2dContext) return false;
+
+    D3D11_TEXTURE2D_DESC texDesc = {};
+    texDesc.Width = targetW;
+    texDesc.Height = targetH;
+    texDesc.MipLevels = 1;
+    texDesc.ArraySize = 1;
+    texDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    texDesc.SampleDesc.Count = 1;
+    texDesc.Usage = D3D11_USAGE_DEFAULT;
+    texDesc.BindFlags = D3D11_BIND_RENDER_TARGET;
+
+    ComPtr<ID3D11Texture2D> renderTex;
+    HRESULT hr = m_d3dDevice->CreateTexture2D(&texDesc, nullptr, &renderTex);
+    if (FAILED(hr)) return false;
+
+    ComPtr<IDXGISurface> dxgiSurface;
+    hr = renderTex.As(&dxgiSurface);
+    if (FAILED(hr)) return false;
+
+    D2D1_BITMAP_PROPERTIES1 bp = D2D1::BitmapProperties1(
+        D2D1_BITMAP_OPTIONS_TARGET,
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED),
+        96.0f, 96.0f
+    );
+    ComPtr<ID2D1Bitmap1> offscreenTarget;
+    hr = m_d2dContext->CreateBitmapFromDxgiSurface(dxgiSurface.Get(), &bp, &offscreenTarget);
+    if (FAILED(hr)) return false;
+
+    ComPtr<ID2D1Image> oldTarget;
+    m_d2dContext->GetTarget(&oldTarget);
+    m_d2dContext->SetTarget(offscreenTarget.Get());
+
+    m_d2dContext->BeginDraw();
+    m_d2dContext->Clear(D2D1::ColorF(0xffffff, 1.0f));
+
+    ComPtr<ID2D1DeviceContext5> ctx5;
+    if (SUCCEEDED(m_d2dContext.As(&ctx5))) {
+        D2D1_SIZE_F vp = svgDoc->GetViewportSize();
+        if (vp.width > 0.0f && vp.height > 0.0f) {
+            float sx = static_cast<float>(targetW) / vp.width;
+            float sy = static_cast<float>(targetH) / vp.height;
+            ctx5->SetTransform(D2D1::Matrix3x2F::Scale(sx, sy));
+        }
+        ctx5->DrawSvgDocument(svgDoc);
+        ctx5->SetTransform(D2D1::Matrix3x2F::Identity());
+    }
+    m_d2dContext->EndDraw();
+    m_d2dContext->SetTarget(oldTarget.Get());
+
+    texDesc.Usage = D3D11_USAGE_STAGING;
+    texDesc.BindFlags = 0;
+    texDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    ComPtr<ID3D11Texture2D> stagingTex;
+    hr = m_d3dDevice->CreateTexture2D(&texDesc, nullptr, &stagingTex);
+    if (FAILED(hr)) return false;
+
+    m_d3dContext->CopyResource(stagingTex.Get(), renderTex.Get());
+
+    D3D11_MAPPED_SUBRESOURCE mapped;
+    hr = m_d3dContext->Map(stagingTex.Get(), 0, D3D11_MAP_READ, 0, &mapped);
+    if (FAILED(hr)) return false;
+
+    outPixels.resize(targetW * targetH);
+    for (UINT y = 0; y < targetH; ++y) {
+        const uint32_t* srcRow = reinterpret_cast<const uint32_t*>(static_cast<const BYTE*>(mapped.pData) + y * mapped.RowPitch);
+        memcpy(&outPixels[y * targetW], srcRow, targetW * sizeof(uint32_t));
+    }
+    m_d3dContext->Unmap(stagingTex.Get(), 0);
+
+    return true;
+}
+
+void D2DRenderer::RenderPrintPreview(TabItem* activeTab, const PrintSettings& settings, POINT mousePt) {
+    m_printHits.clear();
+
+    float clientW = static_cast<float>(m_width);
+    float clientH = static_cast<float>(m_height);
+
+    // 1. Dark Backdrop Scrim
+    m_brushBg->SetColor(D2D1::ColorF(0x000000, 0.75f));
+    m_d2dContext->FillRectangle(D2D1::RectF(0, 0, clientW, clientH), m_brushBg.Get());
+
+    // 2. Modal Card
+    float cardW = std::min(920.0f * m_dpiScale, clientW - 24.0f);
+    float cardH = std::min(580.0f * m_dpiScale, clientH - 24.0f);
+    float cardX = (clientW - cardW) / 2.0f;
+    float cardY = (clientH - cardH) / 2.0f;
+
+    m_printCardRect = D2D1::RectF(cardX, cardY, cardX + cardW, cardY + cardH);
+
+    m_brushChrome->SetColor(D2D1::ColorF(0x18181b, 0.98f));
+    m_d2dContext->FillRoundedRectangle(D2D1::RoundedRect(m_printCardRect, 12.0f, 12.0f), m_brushChrome.Get());
+
+    m_brushBorder->SetColor(D2D1::ColorF(0x3f3f46, 0.9f));
+    m_d2dContext->DrawRoundedRectangle(D2D1::RoundedRect(m_printCardRect, 12.0f, 12.0f), m_brushBorder.Get(), 1.5f);
+
+    // 3. Header Bar
+    float headerPad = 20.0f * m_dpiScale;
+    float titleY = cardY + 16.0f * m_dpiScale;
+
+    m_brushText->SetColor(D2D1::ColorF(0xf8fafc));
+    const wchar_t title[] = L"Print Preview";
+    D2D1_RECT_F titleRect = D2D1::RectF(cardX + headerPad, titleY, cardX + cardW - 60.0f * m_dpiScale, titleY + 22.0f * m_dpiScale);
+    m_d2dContext->DrawText(title, static_cast<UINT32>(wcslen(title)), m_formatHelpCat.Get(), titleRect, m_brushText.Get());
+
+    m_brushTextMuted->SetColor(D2D1::ColorF(0x94a3b8));
+    const wchar_t sub[] = L"High-Resolution Native Printing";
+    D2D1_RECT_F subRect = D2D1::RectF(cardX + headerPad, titleY + 20.0f * m_dpiScale, cardX + cardW - 60.0f * m_dpiScale, titleY + 36.0f * m_dpiScale);
+    m_d2dContext->DrawText(sub, static_cast<UINT32>(wcslen(sub)), m_formatKeyDesc.Get(), subRect, m_brushTextMuted.Get());
+
+    // Close button ('✕')
+    float closeSize = 24.0f * m_dpiScale;
+    float closeX1 = cardX + cardW - headerPad - closeSize;
+    float closeY1 = cardY + 16.0f * m_dpiScale;
+    m_printCloseRect = D2D1::RectF(closeX1, closeY1, closeX1 + closeSize, closeY1 + closeSize);
+
+    bool isCloseHov = (mousePt.x >= m_printCloseRect.left && mousePt.x <= m_printCloseRect.right &&
+                       mousePt.y >= m_printCloseRect.top && mousePt.y <= m_printCloseRect.bottom);
+
+    if (isCloseHov) {
+        m_brushChrome->SetColor(D2D1::ColorF(0xef4444, 0.85f));
+        m_d2dContext->FillRoundedRectangle(D2D1::RoundedRect(m_printCloseRect, 4.0f, 4.0f), m_brushChrome.Get());
+        m_brushText->SetColor(D2D1::ColorF(0xffffff));
+    } else {
+        m_brushText->SetColor(D2D1::ColorF(0x94a3b8));
+    }
+    const wchar_t closeIcon[] = L"✕";
+    m_d2dContext->DrawText(closeIcon, 1, m_formatHud.Get(), m_printCloseRect, m_brushText.Get());
+
+    // Divider Line below header
+    float divY = cardY + 54.0f * m_dpiScale;
+    m_brushBorder->SetColor(D2D1::ColorF(0x27272a, 1.0f));
+    m_d2dContext->DrawLine(D2D1::Point2F(cardX + headerPad, divY), D2D1::Point2F(cardX + cardW - headerPad, divY), m_brushBorder.Get(), 1.0f);
+
+    // 4. Split Layout
+    float sidebarW = 310.0f * m_dpiScale;
+    float leftAreaX = cardX + 16.0f * m_dpiScale;
+    float leftAreaY = divY + 12.0f * m_dpiScale;
+    float leftAreaW = cardW - sidebarW - 32.0f * m_dpiScale;
+    float leftAreaH = cardH - (divY - cardY) - 24.0f * m_dpiScale;
+
+    // Vertical Divider
+    float vDivX = cardX + cardW - sidebarW - 8.0f * m_dpiScale;
+    m_d2dContext->DrawLine(D2D1::Point2F(vDivX, divY + 8.0f * m_dpiScale), D2D1::Point2F(vDivX, cardY + cardH - 16.0f * m_dpiScale), m_brushBorder.Get(), 1.0f);
+
+    // 5. Left Area: Virtual Paper Simulation
+    const auto& presets = GetPaperPresets();
+    int presetIdx = std::clamp(settings.paperPresetIdx, 0, static_cast<int>(presets.size() - 1));
+    const auto& preset = presets[presetIdx];
+
+    float pwMm = (settings.orientation == PrintOrientation::Portrait) ? preset.widthMm : preset.heightMm;
+    float phMm = (settings.orientation == PrintOrientation::Portrait) ? preset.heightMm : preset.widthMm;
+    float paperAspect = pwMm / phMm;
+
+    float availW = leftAreaW - 32.0f * m_dpiScale;
+    float availH = leftAreaH - 44.0f * m_dpiScale; // reserve 44px for bottom caption
+    float paperW = availW;
+    float paperH = availH;
+    if (availW / availH > paperAspect) {
+        paperH = availH;
+        paperW = paperH * paperAspect;
+    } else {
+        paperW = availW;
+        paperH = paperW / paperAspect;
+    }
+
+    float paperX = leftAreaX + (leftAreaW - paperW) / 2.0f;
+    float paperY = leftAreaY + (availH - paperH) / 2.0f;
+    D2D1_RECT_F paperRect = D2D1::RectF(paperX, paperY, paperX + paperW, paperY + paperH);
+
+    // Drop Shadow
+    m_brushBg->SetColor(D2D1::ColorF(0x000000, 0.45f));
+    m_d2dContext->FillRectangle(D2D1::RectF(paperX + 5.0f, paperY + 5.0f, paperX + paperW + 5.0f, paperY + paperH + 5.0f), m_brushBg.Get());
+
+    // Paper Sheet (White)
+    m_brushText->SetColor(D2D1::ColorF(0xffffff, 1.0f));
+    m_d2dContext->FillRectangle(paperRect, m_brushText.Get());
+    m_brushBorder->SetColor(D2D1::ColorF(0xd4d4d8, 1.0f));
+    m_d2dContext->DrawRectangle(paperRect, m_brushBorder.Get(), 1.0f);
+
+    // Margins
+    float marginMm = 12.7f; // Normal: 0.5 in
+    if (settings.marginMode == PrintMarginMode::Narrow) marginMm = 6.35f;
+    else if (settings.marginMode == PrintMarginMode::Borderless) marginMm = 0.0f;
+
+    float mmToPx = paperW / pwMm;
+    float marginPxX = marginMm * mmToPx;
+    float marginPxY = marginMm * mmToPx;
+
+    D2D1_RECT_F marginRect = D2D1::RectF(
+        paperX + marginPxX,
+        paperY + marginPxY,
+        paperX + paperW - marginPxX,
+        paperY + paperH - marginPxY
+    );
+
+    if (marginMm > 0.0f) {
+        m_brushBorder->SetColor(D2D1::ColorF(0x94a3b8, 0.6f));
+        m_d2dContext->DrawRectangle(marginRect, m_brushBorder.Get(), 1.0f);
+    }
+
+    // Image Rendering
+    if (activeTab && activeTab->document && activeTab->document->isValid) {
+        float imgW = static_cast<float>(activeTab->document->GetWidth());
+        float imgH = static_cast<float>(activeTab->document->GetHeight());
+        if (imgW > 0 && imgH > 0) {
+            bool isRot90 = (activeTab->rotationDegrees == 90 || activeTab->rotationDegrees == 270);
+            float visW = isRot90 ? imgH : imgW;
+            float visH = isRot90 ? imgW : imgH;
+            float visAspect = visW / visH;
+
+            float mw = std::max(1.0f, marginRect.right - marginRect.left);
+            float mh = std::max(1.0f, marginRect.bottom - marginRect.top);
+            float marginAspect = mw / mh;
+
+            float destW = mw;
+            float destH = mh;
+            bool clipNeeded = false;
+
+            if (settings.scaleMode == PrintScaleMode::FitToPage) {
+                if (marginAspect > visAspect) {
+                    destH = mh;
+                    destW = destH * visAspect;
+                } else {
+                    destW = mw;
+                    destH = destW / visAspect;
+                }
+            } else if (settings.scaleMode == PrintScaleMode::FillPage) {
+                clipNeeded = true;
+                if (marginAspect > visAspect) {
+                    destW = mw;
+                    destH = destW / visAspect;
+                } else {
+                    destH = mh;
+                    destW = destH * visAspect;
+                }
+            } else { // ActualSize (1:1 physical size at 96 DPI)
+                clipNeeded = true;
+                float physW_mm = (visW / 96.0f) * 25.4f;
+                float physH_mm = (visH / 96.0f) * 25.4f;
+                destW = physW_mm * mmToPx;
+                destH = physH_mm * mmToPx;
+            }
+
+            float destX = marginRect.left + (mw - destW) / 2.0f;
+            float destY = marginRect.top + (mh - destH) / 2.0f;
+            D2D1_RECT_F destRect = D2D1::RectF(destX, destY, destX + destW, destY + destH);
+
+            if (clipNeeded) {
+                m_d2dContext->PushAxisAlignedClip(marginRect, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+            }
+
+            float cx = (destRect.left + destRect.right) / 2.0f;
+            float cy = (destRect.top + destRect.bottom) / 2.0f;
+
+            D2D1_MATRIX_3X2_F xform = D2D1::Matrix3x2F::Rotation(static_cast<float>(activeTab->rotationDegrees), D2D1::Point2F(cx, cy))
+                * D2D1::Matrix3x2F::Scale(activeTab->flipH ? -1.0f : 1.0f, activeTab->flipV ? -1.0f : 1.0f, D2D1::Point2F(cx, cy));
+            m_d2dContext->SetTransform(xform);
+
+            D2D1_RECT_F drawRect = destRect;
+            if (isRot90) {
+                drawRect = D2D1::RectF(cx - destH / 2.0f, cy - destW / 2.0f, cx + destH / 2.0f, cy + destW / 2.0f);
+            }
+
+            if (activeTab->document->metadata.isSvg && activeTab->svgDocument) {
+                ComPtr<ID2D1DeviceContext5> ctx5;
+                if (SUCCEEDED(m_d2dContext.As(&ctx5))) {
+                    float sx = (drawRect.right - drawRect.left) / imgW;
+                    float sy = (drawRect.bottom - drawRect.top) / imgH;
+                    D2D1_MATRIX_3X2_F svgXform = D2D1::Matrix3x2F::Translation(-imgW / 2.0f, -imgH / 2.0f)
+                        * D2D1::Matrix3x2F::Scale(sx, sy)
+                        * D2D1::Matrix3x2F::Translation(cx, cy)
+                        * xform;
+                    ctx5->SetTransform(svgXform);
+                    ctx5->DrawSvgDocument(activeTab->svgDocument.Get());
+                }
+            } else {
+                size_t frameCount = activeTab->document->GetFrameCount();
+                if (frameCount > 0) {
+                    size_t fIdx = activeTab->currentFrame % frameCount;
+                    if (fIdx >= activeTab->gpuBitmaps.size()) {
+                        activeTab->gpuBitmaps.resize(frameCount);
+                    }
+                    if (!activeTab->gpuBitmaps[fIdx]) {
+                        const FrameData* fd = activeTab->document->GetFrame(fIdx);
+                        if (fd && fd->bitmap) {
+                            m_d2dContext->CreateBitmapFromWicBitmap(fd->bitmap.Get(), nullptr, &activeTab->gpuBitmaps[fIdx]);
+                        }
+                    }
+                    if (activeTab->gpuBitmaps[fIdx]) {
+                        m_d2dContext->DrawBitmap(activeTab->gpuBitmaps[fIdx].Get(), drawRect, 1.0f, D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC);
+                    }
+                }
+            }
+
+            m_d2dContext->SetTransform(D2D1::Matrix3x2F::Identity());
+            if (clipNeeded) {
+                m_d2dContext->PopAxisAlignedClip();
+            }
+        }
+    }
+
+    // Virtual Paper Footer
+    wchar_t szFooter[256];
+    swprintf_s(szFooter, L"%s • %s • %s • %s",
+        preset.name,
+        settings.orientation == PrintOrientation::Portrait ? L"Portrait" : L"Landscape",
+        settings.scaleMode == PrintScaleMode::FitToPage ? L"Fit to Page" : (settings.scaleMode == PrintScaleMode::FillPage ? L"Fill (Crop)" : L"1:1 Actual Size"),
+        settings.marginMode == PrintMarginMode::Normal ? L"Normal 0.5\"" : (settings.marginMode == PrintMarginMode::Narrow ? L"Narrow 0.25\"" : L"Borderless")
+    );
+    D2D1_RECT_F footerRect = D2D1::RectF(leftAreaX, cardY + cardH - 34.0f * m_dpiScale, leftAreaX + leftAreaW, cardY + cardH - 12.0f * m_dpiScale);
+    m_brushTextMuted->SetColor(D2D1::ColorF(0x94a3b8));
+    m_d2dContext->DrawText(szFooter, static_cast<UINT32>(wcslen(szFooter)), m_formatKeyDesc.Get(), footerRect, m_brushTextMuted.Get());
+
+    // 6. Right Controls Sidebar
+    float sideX = cardX + cardW - sidebarW + 8.0f * m_dpiScale;
+    float sideW = sidebarW - 24.0f * m_dpiScale;
+    float curY = divY + 12.0f * m_dpiScale;
+
+    auto DrawSectionLabel = [&](const wchar_t* txt) {
+        D2D1_RECT_F r = D2D1::RectF(sideX, curY, sideX + sideW, curY + 16.0f * m_dpiScale);
+        m_brushTextMuted->SetColor(D2D1::ColorF(0x94a3b8));
+        m_d2dContext->DrawText(txt, static_cast<UINT32>(wcslen(txt)), m_formatKeyDesc.Get(), r, m_brushTextMuted.Get());
+        curY += 18.0f * m_dpiScale;
+    };
+
+    auto DrawStepper = [&](const wchar_t* valText, PrintUiId prevId, PrintUiId nextId) {
+        float boxH = 28.0f * m_dpiScale;
+        float btnW = 28.0f * m_dpiScale;
+        D2D1_RECT_F boxRect = D2D1::RectF(sideX, curY, sideX + sideW, curY + boxH);
+        m_brushChrome->SetColor(D2D1::ColorF(0x27272a, 0.8f));
+        m_d2dContext->FillRoundedRectangle(D2D1::RoundedRect(boxRect, 4.0f, 4.0f), m_brushChrome.Get());
+        m_brushBorder->SetColor(D2D1::ColorF(0x3f3f46, 0.8f));
+        m_d2dContext->DrawRoundedRectangle(D2D1::RoundedRect(boxRect, 4.0f, 4.0f), m_brushBorder.Get(), 1.0f);
+
+        D2D1_RECT_F prevR = D2D1::RectF(sideX, curY, sideX + btnW, curY + boxH);
+        D2D1_RECT_F nextR = D2D1::RectF(sideX + sideW - btnW, curY, sideX + sideW, curY + boxH);
+        D2D1_RECT_F textR = D2D1::RectF(sideX + btnW + 4.0f, curY, sideX + sideW - btnW - 4.0f, curY + boxH);
+
+        m_printHits.push_back({ prevId, prevR });
+        m_printHits.push_back({ nextId, nextR });
+
+        bool prevHov = (mousePt.x >= prevR.left && mousePt.x <= prevR.right && mousePt.y >= prevR.top && mousePt.y <= prevR.bottom);
+        bool nextHov = (mousePt.x >= nextR.left && mousePt.x <= nextR.right && mousePt.y >= nextR.top && mousePt.y <= nextR.bottom);
+
+        m_brushText->SetColor(prevHov ? D2D1::ColorF(0x38bdf8) : D2D1::ColorF(0x94a3b8));
+        m_d2dContext->DrawText(L"◀", 1, m_formatKeycap.Get(), prevR, m_brushText.Get());
+
+        m_brushText->SetColor(nextHov ? D2D1::ColorF(0x38bdf8) : D2D1::ColorF(0x94a3b8));
+        m_d2dContext->DrawText(L"▶", 1, m_formatKeycap.Get(), nextR, m_brushText.Get());
+
+        m_brushText->SetColor(D2D1::ColorF(0xf1f5f9));
+        m_d2dContext->DrawText(valText, static_cast<UINT32>(wcslen(valText)), m_formatKeycap.Get(), textR, m_brushText.Get());
+
+        curY += boxH + 8.0f * m_dpiScale;
+    };
+
+    auto DrawPills = [&](const std::vector<std::pair<const wchar_t*, PrintUiId>>& pills, int activeIdx) {
+        float pillH = 26.0f * m_dpiScale;
+        float spacing = 6.0f * m_dpiScale;
+        float pillW = (sideW - (pills.size() - 1) * spacing) / static_cast<float>(pills.size());
+        for (size_t i = 0; i < pills.size(); ++i) {
+            float px = sideX + i * (pillW + spacing);
+            D2D1_RECT_F pRect = D2D1::RectF(px, curY, px + pillW, curY + pillH);
+            m_printHits.push_back({ pills[i].second, pRect });
+
+            bool isActive = (static_cast<int>(i) == activeIdx);
+            bool isHov = (mousePt.x >= pRect.left && mousePt.x <= pRect.right && mousePt.y >= pRect.top && mousePt.y <= pRect.bottom);
+
+            if (isActive) {
+                m_brushChrome->SetColor(D2D1::ColorF(0x0284c7, 0.9f));
+                m_d2dContext->FillRoundedRectangle(D2D1::RoundedRect(pRect, 4.0f, 4.0f), m_brushChrome.Get());
+                m_brushText->SetColor(D2D1::ColorF(0xffffff));
+            } else {
+                m_brushChrome->SetColor(isHov ? D2D1::ColorF(0x334155, 0.8f) : D2D1::ColorF(0x1e293b, 0.6f));
+                m_d2dContext->FillRoundedRectangle(D2D1::RoundedRect(pRect, 4.0f, 4.0f), m_brushChrome.Get());
+                m_brushBorder->SetColor(D2D1::ColorF(0x3f3f46, 0.8f));
+                m_d2dContext->DrawRoundedRectangle(D2D1::RoundedRect(pRect, 4.0f, 4.0f), m_brushBorder.Get(), 1.0f);
+                m_brushText->SetColor(isHov ? D2D1::ColorF(0xffffff) : D2D1::ColorF(0x94a3b8));
+            }
+
+            m_d2dContext->DrawText(pills[i].first, static_cast<UINT32>(wcslen(pills[i].first)), m_formatKeycap.Get(), pRect, m_brushText.Get());
+        }
+        curY += pillH + 8.0f * m_dpiScale;
+    };
+
+    // Printer
+    std::wstring printerName = settings.printers.empty() ? L"Default Printer" : settings.printers[settings.selectedPrinterIdx % settings.printers.size()];
+    DrawSectionLabel(L"PRINTER");
+    DrawStepper(printerName.c_str(), PrintUiId::PrinterPrev, PrintUiId::PrinterNext);
+
+    // Paper Size
+    DrawSectionLabel(L"PAPER SIZE");
+    DrawStepper(preset.name, PrintUiId::PaperPrev, PrintUiId::PaperNext);
+
+    // Orientation
+    DrawSectionLabel(L"ORIENTATION");
+    DrawPills({ { L"Portrait", PrintUiId::OrientPortrait }, { L"Landscape", PrintUiId::OrientLandscape } }, settings.orientation == PrintOrientation::Portrait ? 0 : 1);
+
+    // Scale Mode
+    DrawSectionLabel(L"SCALE MODE");
+    DrawPills({ { L"Fit", PrintUiId::ScaleFit }, { L"Fill", PrintUiId::ScaleFill }, { L"1:1", PrintUiId::ScaleActual } }, settings.scaleMode == PrintScaleMode::FitToPage ? 0 : (settings.scaleMode == PrintScaleMode::FillPage ? 1 : 2));
+
+    // Margins
+    DrawSectionLabel(L"MARGINS");
+    DrawPills({ { L"Normal", PrintUiId::MarginNormal }, { L"Narrow", PrintUiId::MarginNarrow }, { L"None", PrintUiId::MarginNone } }, settings.marginMode == PrintMarginMode::Normal ? 0 : (settings.marginMode == PrintMarginMode::Narrow ? 1 : 2));
+
+    // Copies
+    wchar_t szCopies[32];
+    swprintf_s(szCopies, L"%d", settings.copies);
+    DrawSectionLabel(L"COPIES");
+    DrawStepper(szCopies, PrintUiId::CopiesMinus, PrintUiId::CopiesPlus);
+
+    curY += 4.0f * m_dpiScale;
+
+    // Action Buttons
+    float btnH = 30.0f * m_dpiScale;
+    D2D1_RECT_F sysRect = D2D1::RectF(sideX, curY, sideX + sideW, curY + btnH);
+    m_printHits.push_back({ PrintUiId::SystemDialog, sysRect });
+    bool sysHov = (mousePt.x >= sysRect.left && mousePt.x <= sysRect.right && mousePt.y >= sysRect.top && mousePt.y <= sysRect.bottom);
+    m_brushChrome->SetColor(sysHov ? D2D1::ColorF(0x334155, 0.9f) : D2D1::ColorF(0x27272a, 0.8f));
+    m_d2dContext->FillRoundedRectangle(D2D1::RoundedRect(sysRect, 4.0f, 4.0f), m_brushChrome.Get());
+    m_brushBorder->SetColor(D2D1::ColorF(0x3f3f46, 0.8f));
+    m_d2dContext->DrawRoundedRectangle(D2D1::RoundedRect(sysRect, 4.0f, 4.0f), m_brushBorder.Get(), 1.0f);
+    m_brushText->SetColor(sysHov ? D2D1::ColorF(0xffffff) : D2D1::ColorF(0x94a3b8));
+    const wchar_t sysText[] = L"⚙️ System Dialog...";
+    m_d2dContext->DrawText(sysText, static_cast<UINT32>(wcslen(sysText)), m_formatKeycap.Get(), sysRect, m_brushText.Get());
+
+    curY += btnH + 8.0f * m_dpiScale;
+
+    float printBtnH = 34.0f * m_dpiScale;
+    D2D1_RECT_F printRect = D2D1::RectF(sideX, curY, sideX + sideW, curY + printBtnH);
+    m_printHits.push_back({ PrintUiId::ExecutePrint, printRect });
+    bool printHov = (mousePt.x >= printRect.left && mousePt.x <= printRect.right && mousePt.y >= printRect.top && mousePt.y <= printRect.bottom);
+    m_brushChrome->SetColor(printHov ? D2D1::ColorF(0x0284c7, 1.0f) : D2D1::ColorF(0x0369a1, 0.95f));
+    m_d2dContext->FillRoundedRectangle(D2D1::RoundedRect(printRect, 6.0f, 6.0f), m_brushChrome.Get());
+    m_brushText->SetColor(D2D1::ColorF(0xffffff));
+    const wchar_t printText[] = L"🖨️ Print (Enter)";
+    m_d2dContext->DrawText(printText, static_cast<UINT32>(wcslen(printText)), m_formatKeycap.Get(), printRect, m_brushText.Get());
 }

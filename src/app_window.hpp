@@ -38,6 +38,9 @@ private:
     float m_hudAlpha = 1.0f;
     ULONGLONG m_lastMouseMoveTick = 0;
 
+    // Print Preview & Spooler
+    PrintSettings m_printSettings;
+
     void Invalidate();
     void UpdateWindowTitle();
     void ToggleFullscreen();
@@ -49,6 +52,13 @@ private:
     void DeleteCurrentFile();
     void ShowContextMenu(int x, int y);
     void HandleHudAction(HudButtonId id);
+
+    void OpenPrintPreview();
+    void ClosePrintPreview();
+    void HandlePrintUiClick(PrintUiId id);
+    void ExecutePrintJob();
+    void OpenSystemPrintDialog();
+    void SpoolPageToHdc(HDC hdc);
 
     void NextImage();
     void PrevImage();

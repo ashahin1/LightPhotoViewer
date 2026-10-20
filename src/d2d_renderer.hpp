@@ -23,6 +23,55 @@ enum class CanvasBackground {
     Light
 };
 
+enum class PrintOrientation { Portrait, Landscape };
+enum class PrintScaleMode   { FitToPage, FillPage, ActualSize };
+enum class PrintMarginMode  { Normal, Narrow, Borderless };
+
+struct PaperPreset {
+    short dmPaperCode;
+    const wchar_t* name;
+    float widthMm;
+    float heightMm;
+};
+
+struct PrintSettings {
+    bool isActive = false;
+    std::vector<std::wstring> printers;
+    int selectedPrinterIdx = 0;
+    int paperPresetIdx = 0; // 0: A4, 1: Letter, 2: Legal, 3: A3, 4: A5, 5: 4x6", 6: 5x7", 7: 8x10"
+    PrintOrientation orientation = PrintOrientation::Portrait;
+    PrintScaleMode scaleMode = PrintScaleMode::FitToPage;
+    PrintMarginMode marginMode = PrintMarginMode::Normal;
+    int copies = 1;
+};
+
+enum class PrintUiId {
+    None,
+    CloseModal,
+    CardBody,
+    PrinterPrev,
+    PrinterNext,
+    PaperPrev,
+    PaperNext,
+    OrientPortrait,
+    OrientLandscape,
+    ScaleFit,
+    ScaleFill,
+    ScaleActual,
+    MarginNormal,
+    MarginNarrow,
+    MarginNone,
+    CopiesMinus,
+    CopiesPlus,
+    SystemDialog,
+    ExecutePrint
+};
+
+struct PrintHitBox {
+    PrintUiId id;
+    D2D1_RECT_F rect;
+};
+
 struct HudButtonInfo {
     HudButtonId id;
     std::wstring label;
@@ -44,7 +93,7 @@ public:
 
     bool Initialize(HWND hWnd);
     void Resize(UINT width, UINT height);
-    void Render(TabManager& tabManager, float hudAlpha, bool showExif, bool showHelp, bool isSlideshow, POINT mousePt);
+    void Render(TabManager& tabManager, float hudAlpha, bool showExif, bool showHelp, bool isSlideshow, const PrintSettings& printSettings, POINT mousePt);
 
     // Hit testing
     int HitTestTab(POINT pt, const TabManager& tabManager, bool& outCloseButton);
@@ -53,6 +102,7 @@ public:
     bool HitTestHelpClose(POINT pt);
     bool HitTestHelpCard(POINT pt);
     int HitTestRecentFile(POINT pt, std::wstring& outPath);
+    PrintUiId HitTestPrintUi(POINT pt);
 
     float GetDpiScale() const { return m_dpiScale; }
     void UpdateDpi(float dpi);
@@ -61,6 +111,9 @@ public:
 
     void CycleBackgroundMode();
     CanvasBackground GetBackgroundMode() const { return m_bgMode; }
+
+    static const std::vector<PaperPreset>& GetPaperPresets();
+    bool RasterizeSvgToPixels(ID2D1SvgDocument* svgDoc, UINT targetW, UINT targetH, std::vector<uint32_t>& outPixels);
 
 private:
     HWND m_hWnd = nullptr;
@@ -106,6 +159,9 @@ private:
     D2D1_RECT_F m_helpCloseRect = { 0, 0, 0, 0 };
     D2D1_RECT_F m_tabAddRect = { 0, 0, 0, 0 };
     std::vector<RecentFileHitBox> m_recentHits;
+    std::vector<PrintHitBox> m_printHits;
+    D2D1_RECT_F m_printCardRect = { 0, 0, 0, 0 };
+    D2D1_RECT_F m_printCloseRect = { 0, 0, 0, 0 };
 
     bool CreateDeviceIndependentResources();
     bool CreateDeviceResources();
@@ -117,6 +173,7 @@ private:
     void RenderHud(TabItem* activeTab, float hudAlpha, POINT mousePt);
     void RenderExifOverlay(TabItem* tab);
     void RenderHelpOverlay(POINT mousePt);
+    void RenderPrintPreview(TabItem* activeTab, const PrintSettings& settings, POINT mousePt);
     void RenderEmptyState(const TabManager& tabManager, POINT mousePt);
     void RenderSlideshowBadge();
     void DrawCheckerboard(D2D1_RECT_F rect);
