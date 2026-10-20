@@ -1471,7 +1471,9 @@ void D2DRenderer::RenderPrintPreview(TabItem* activeTab, const PrintSettings& se
             } else {
                 size_t frameCount = activeTab->document->GetFrameCount();
                 if (frameCount > 0) {
-                    size_t fIdx = activeTab->currentFrame % frameCount;
+                    size_t fIdx = settings.isAnimated
+                        ? (settings.selectedFrameIdx % frameCount)
+                        : (activeTab->currentFrame % frameCount);
                     if (fIdx >= activeTab->gpuBitmaps.size()) {
                         activeTab->gpuBitmaps.resize(frameCount);
                     }
@@ -1590,6 +1592,42 @@ void D2DRenderer::RenderPrintPreview(TabItem* activeTab, const PrintSettings& se
     D2D1_RECT_F paperBoxRect;
     DrawSectionLabel(L"PAPER SIZE");
     DrawDropdownSelector(preset.name, PrintUiId::PaperDropdownBtn, settings.openDropdown == PrintDropdownState::PaperSize, paperBoxRect);
+
+    // 2b. GIF / Multi-Frame Stepper
+    if (settings.isAnimated && settings.totalFrameCount > 1) {
+        DrawSectionLabel(L"ANIMATION FRAME");
+        float boxH = 28.0f * m_dpiScale;
+        float btnW = 28.0f * m_dpiScale;
+
+        D2D1_RECT_F prevR = D2D1::RectF(sideX, curY, sideX + btnW, curY + boxH);
+        D2D1_RECT_F nextR = D2D1::RectF(sideX + sideW - btnW, curY, sideX + sideW, curY + boxH);
+        D2D1_RECT_F textR = D2D1::RectF(sideX + btnW + 4.0f * m_dpiScale, curY, sideX + sideW - btnW - 4.0f * m_dpiScale, curY + boxH);
+
+        m_printHits.push_back({ PrintUiId::FramePrev, -1, prevR });
+        m_printHits.push_back({ PrintUiId::FrameNext, -1, nextR });
+
+        bool prevHov = (mousePt.x >= prevR.left && mousePt.x <= prevR.right && mousePt.y >= prevR.top && mousePt.y <= prevR.bottom);
+        bool nextHov = (mousePt.x >= nextR.left && mousePt.x <= nextR.right && mousePt.y >= nextR.top && mousePt.y <= nextR.bottom);
+
+        D2D1_RECT_F boxRect = D2D1::RectF(sideX, curY, sideX + sideW, curY + boxH);
+        m_brushChrome->SetColor(D2D1::ColorF(0x222226, 0.8f));
+        m_d2dContext->FillRoundedRectangle(D2D1::RoundedRect(boxRect, 4.0f, 4.0f), m_brushChrome.Get());
+        m_brushBorder->SetColor(D2D1::ColorF(0x3f3f46, 0.8f));
+        m_d2dContext->DrawRoundedRectangle(D2D1::RoundedRect(boxRect, 4.0f, 4.0f), m_brushBorder.Get(), 1.0f);
+
+        m_brushText->SetColor(prevHov ? D2D1::ColorF(0x38bdf8) : D2D1::ColorF(0x94a3b8));
+        m_d2dContext->DrawText(L"◀", 1, m_formatKeycap.Get(), prevR, m_brushText.Get());
+
+        m_brushText->SetColor(nextHov ? D2D1::ColorF(0x38bdf8) : D2D1::ColorF(0x94a3b8));
+        m_d2dContext->DrawText(L"▶", 1, m_formatKeycap.Get(), nextR, m_brushText.Get());
+
+        wchar_t szFrame[64];
+        swprintf_s(szFrame, L"Frame %zu of %zu", settings.selectedFrameIdx + 1, settings.totalFrameCount);
+        m_brushText->SetColor(D2D1::ColorF(0xf1f5f9));
+        m_d2dContext->DrawText(szFrame, static_cast<UINT32>(wcslen(szFrame)), m_formatKeycap.Get(), textR, m_brushText.Get());
+
+        curY += boxH + 8.0f * m_dpiScale;
+    }
 
     // 3. Orientation
     DrawSectionLabel(L"ORIENTATION");

@@ -830,6 +830,24 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
                     return 0;
                 }
 
+                // Animation frame navigation with [ and ]
+                if (m_printSettings.isAnimated && m_printSettings.totalFrameCount > 1) {
+                    if (wParam == VK_OEM_4) { // '['
+                        if (m_printSettings.selectedFrameIdx == 0) {
+                            m_printSettings.selectedFrameIdx = m_printSettings.totalFrameCount - 1;
+                        } else {
+                            m_printSettings.selectedFrameIdx--;
+                        }
+                        Invalidate();
+                        return 0;
+                    }
+                    if (wParam == VK_OEM_6) { // ']'
+                        m_printSettings.selectedFrameIdx = (m_printSettings.selectedFrameIdx + 1) % m_printSettings.totalFrameCount;
+                        Invalidate();
+                        return 0;
+                    }
+                }
+
                 // STRICTLY SUPPRESS all other keys (arrows, Space, Delete, Home, End, R, L, etc.)
                 return 0;
             }
@@ -1177,7 +1195,7 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
 
                 // 1. GIF Frame Animation update
                 TabItem* tab = m_tabManager.GetActiveTab();
-                if (tab && tab->document && tab->document->metadata.isAnimated) {
+                if (!m_printSettings.isActive && tab && tab->document && tab->document->metadata.isAnimated) {
                     size_t frameCount = tab->document->GetFrameCount();
                     if (frameCount > 1) {
                         ULONGLONG now = GetTickCount64();
@@ -1345,6 +1363,12 @@ void AppWindow::OpenPrintPreview() {
     float vh = static_cast<float>(isRot90 ? tab->document->GetWidth() : tab->document->GetHeight());
     m_printSettings.orientation = (vw > vh) ? PrintOrientation::Landscape : PrintOrientation::Portrait;
 
+    // 4. Initialize animation / multi-frame state
+    size_t frameCount = tab->document->GetFrameCount();
+    m_printSettings.totalFrameCount = frameCount;
+    m_printSettings.isAnimated = tab->document->metadata.isAnimated && (frameCount > 1);
+    m_printSettings.selectedFrameIdx = (tab->currentFrame < frameCount) ? tab->currentFrame : 0;
+
     m_printSettings.openDropdown = PrintDropdownState::None;
     m_printSettings.isEditingCopies = false;
     m_printSettings.copiesEditBuffer.clear();
@@ -1354,6 +1378,13 @@ void AppWindow::OpenPrintPreview() {
 }
 
 void AppWindow::ClosePrintPreview() {
+    TabItem* tab = m_tabManager.GetActiveTab();
+    if (tab) {
+        if (m_printSettings.isAnimated && m_printSettings.totalFrameCount > 1) {
+            tab->currentFrame = m_printSettings.selectedFrameIdx;
+        }
+        tab->lastFrameTick = GetTickCount64();
+    }
     m_printSettings.openDropdown = PrintDropdownState::None;
     m_printSettings.isEditingCopies = false;
     m_printSettings.copiesEditBuffer.clear();
@@ -1365,6 +1396,22 @@ void AppWindow::HandlePrintUiClick(PrintUiId id) {
     switch (id) {
         case PrintUiId::CloseModal:
             ClosePrintPreview();
+            break;
+        case PrintUiId::FramePrev:
+            if (m_printSettings.isAnimated && m_printSettings.totalFrameCount > 1) {
+                if (m_printSettings.selectedFrameIdx == 0) {
+                    m_printSettings.selectedFrameIdx = m_printSettings.totalFrameCount - 1;
+                } else {
+                    m_printSettings.selectedFrameIdx--;
+                }
+                Invalidate();
+            }
+            break;
+        case PrintUiId::FrameNext:
+            if (m_printSettings.isAnimated && m_printSettings.totalFrameCount > 1) {
+                m_printSettings.selectedFrameIdx = (m_printSettings.selectedFrameIdx + 1) % m_printSettings.totalFrameCount;
+                Invalidate();
+            }
             break;
         case PrintUiId::OrientPortrait:
             m_printSettings.orientation = PrintOrientation::Portrait;
@@ -1572,7 +1619,8 @@ void AppWindow::SpoolPageToHdc(HDC hdc) {
     }
 
     if (dibPixels.empty()) {
-        const FrameData* fd = tab->document->GetFrame(tab->currentFrame);
+        size_t frameToPrint = m_printSettings.isAnimated ? m_printSettings.selectedFrameIdx : tab->currentFrame;
+        const FrameData* fd = tab->document->GetFrame(frameToPrint);
         if (!fd || !fd->bitmap) return;
 
         std::vector<BYTE> srcBytes(srcW * srcH * 4);

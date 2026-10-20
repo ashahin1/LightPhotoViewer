@@ -50,6 +50,11 @@ struct PrintSettings {
     PrintMarginMode marginMode = PrintMarginMode::Normal;
     int copies = 1;
 
+    // Multi-Frame / GIF Animation State
+    bool isAnimated = false;
+    size_t selectedFrameIdx = 0;
+    size_t totalFrameCount = 1;
+
     // Dropdown & Input State
     PrintDropdownState openDropdown = PrintDropdownState::None;
     bool isEditingCopies = false;
@@ -79,6 +84,8 @@ enum class PrintUiId {
     PrinterDropdownBtn,
     PaperDropdownBtn,
     DropdownItem,
+    FramePrev,
+    FrameNext,
     OrientPortrait,
     OrientLandscape,
     ScaleFit,
