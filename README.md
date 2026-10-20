@@ -7,7 +7,7 @@
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://isocpp.org/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-0078D6.svg)](https://www.microsoft.com/windows)
 [![Release](https://img.shields.io/github/v/release/ashahin1/LightPhotoViewer?color=blue)](https://github.com/ashahin1/LightPhotoViewer/releases)
-[![Binary Size](https://img.shields.io/badge/Binary%20Size-426%20KB-brightgreen.svg)]()
+[![Binary Size](https://img.shields.io/badge/Binary%20Size-434%20KB-brightgreen.svg)]()
 [![Private RAM](https://img.shields.io/badge/Private%20RAM-35--50%20MB-success.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -24,7 +24,7 @@ Measured on Windows 11 (64-bit) with cold execution and hardware performance cou
 
 | Metric | LightPhotoViewer | Windows Photos | ImageGlass | IrfanView |
 | :--- | :---: | :---: | :---: | :---: |
-| **Standalone Binary Size** | **426 KB** | ~150 MB | ~65 MB | ~3 MB |
+| **Standalone Binary Size** | **434 KB** | ~150 MB | ~65 MB | ~3 MB |
 | **External Runtime DLLs** | **0** (Native OS only) | 40+ | 30+ | 0–10 |
 | **Cold Startup Latency** | **~220 ms** | ~1,800 ms | ~900 ms | ~120 ms |
 | **Private RAM (4K Image)** | **~35–50 MB** | ~180 MB | ~110 MB | ~40 MB |

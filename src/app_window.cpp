@@ -530,15 +530,87 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
             // If Print Preview is active, handle overlay controls or backdrop click
             if (m_printSettings.isActive) {
                 PrintUiId printId = m_renderer.HitTestPrintUi(pt);
-                if (printId == PrintUiId::CloseModal) {
-                    ClosePrintPreview();
-                } else if (printId == PrintUiId::CardBody) {
-                    // Clicked on card body without specific action
-                } else if (printId != PrintUiId::None) {
-                    HandlePrintUiClick(printId);
-                } else {
-                    // Clicked on backdrop outside card
-                    ClosePrintPreview();
+
+                // 1. Check if clicking inside an active dropdown list
+                if (m_printSettings.openDropdown != PrintDropdownState::None) {
+                    if (printId == PrintUiId::DropdownItem) {
+                        int idx = m_renderer.GetHitDropdownIndex();
+                        if (m_printSettings.openDropdown == PrintDropdownState::Printer) {
+                            if (idx >= 0 && idx < static_cast<int>(m_printSettings.printers.size())) {
+                                m_printSettings.selectedPrinterIdx = idx;
+                            }
+                        } else if (m_printSettings.openDropdown == PrintDropdownState::PaperSize) {
+                            if (idx >= 0 && idx < static_cast<int>(D2DRenderer::GetPaperPresets().size())) {
+                                m_printSettings.paperPresetIdx = idx;
+                            }
+                        }
+                        m_printSettings.openDropdown = PrintDropdownState::None;
+                        Invalidate();
+                        return 0;
+                    } else {
+                        // Clicked outside dropdown list items: close dropdown
+                        PrintDropdownState prevOpen = m_printSettings.openDropdown;
+                        m_printSettings.openDropdown = PrintDropdownState::None;
+                        // If they clicked the toggle button of the already-open dropdown, just close it
+                        if ((prevOpen == PrintDropdownState::Printer && printId == PrintUiId::PrinterDropdownBtn) ||
+                            (prevOpen == PrintDropdownState::PaperSize && printId == PrintUiId::PaperDropdownBtn)) {
+                            Invalidate();
+                            return 0;
+                        }
+                    }
+                }
+
+                // 2. Commit Copies edit if clicking anywhere other than the copies box
+                if (m_printSettings.isEditingCopies && printId != PrintUiId::CopiesInputBox) {
+                    m_printSettings.CommitCopiesEdit();
+                }
+
+                // 3. Dispatch control actions
+                switch (printId) {
+                    case PrintUiId::CloseModal:
+                        ClosePrintPreview();
+                        break;
+                    case PrintUiId::CardBody:
+                        Invalidate();
+                        break;
+                    case PrintUiId::PrinterDropdownBtn:
+                        m_printSettings.openDropdown = (m_printSettings.openDropdown == PrintDropdownState::Printer)
+                            ? PrintDropdownState::None
+                            : PrintDropdownState::Printer;
+                        Invalidate();
+                        break;
+                    case PrintUiId::PaperDropdownBtn:
+                        m_printSettings.openDropdown = (m_printSettings.openDropdown == PrintDropdownState::PaperSize)
+                            ? PrintDropdownState::None
+                            : PrintDropdownState::PaperSize;
+                        Invalidate();
+                        break;
+                    case PrintUiId::CopiesInputBox:
+                        m_printSettings.isEditingCopies = true;
+                        m_printSettings.copiesEditBuffer = std::to_wstring(m_printSettings.copies);
+                        m_printSettings.openDropdown = PrintDropdownState::None;
+                        Invalidate();
+                        break;
+                    case PrintUiId::CopiesMinus:
+                        m_printSettings.CommitCopiesEdit();
+                        if (m_printSettings.copies > 1) {
+                            m_printSettings.copies--;
+                            Invalidate();
+                        }
+                        break;
+                    case PrintUiId::CopiesPlus:
+                        m_printSettings.CommitCopiesEdit();
+                        if (m_printSettings.copies < 99) {
+                            m_printSettings.copies++;
+                            Invalidate();
+                        }
+                        break;
+                    case PrintUiId::None:
+                        ClosePrintPreview();
+                        break;
+                    default:
+                        HandlePrintUiClick(printId);
+                        break;
                 }
                 return 0;
             }
@@ -670,6 +742,105 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         case WM_KEYDOWN: {
             bool ctrlDown = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
             bool shiftDown = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+
+            // 1. Strict Modal Isolation: Print Preview
+            if (m_printSettings.isActive) {
+                // If a dropdown list is open, handle navigation or closing
+                if (m_printSettings.openDropdown != PrintDropdownState::None) {
+                    if (wParam == VK_ESCAPE) {
+                        m_printSettings.openDropdown = PrintDropdownState::None;
+                        Invalidate();
+                        return 0;
+                    }
+                    if (wParam == VK_UP) {
+                        if (m_printSettings.openDropdown == PrintDropdownState::Printer && !m_printSettings.printers.empty()) {
+                            int count = static_cast<int>(m_printSettings.printers.size());
+                            m_printSettings.selectedPrinterIdx = (m_printSettings.selectedPrinterIdx - 1 + count) % count;
+                            Invalidate();
+                        } else if (m_printSettings.openDropdown == PrintDropdownState::PaperSize) {
+                            int count = static_cast<int>(D2DRenderer::GetPaperPresets().size());
+                            m_printSettings.paperPresetIdx = (m_printSettings.paperPresetIdx - 1 + count) % count;
+                            Invalidate();
+                        }
+                        return 0;
+                    }
+                    if (wParam == VK_DOWN) {
+                        if (m_printSettings.openDropdown == PrintDropdownState::Printer && !m_printSettings.printers.empty()) {
+                            int count = static_cast<int>(m_printSettings.printers.size());
+                            m_printSettings.selectedPrinterIdx = (m_printSettings.selectedPrinterIdx + 1) % count;
+                            Invalidate();
+                        } else if (m_printSettings.openDropdown == PrintDropdownState::PaperSize) {
+                            int count = static_cast<int>(D2DRenderer::GetPaperPresets().size());
+                            m_printSettings.paperPresetIdx = (m_printSettings.paperPresetIdx + 1) % count;
+                            Invalidate();
+                        }
+                        return 0;
+                    }
+                    if (wParam == VK_RETURN) {
+                        m_printSettings.openDropdown = PrintDropdownState::None;
+                        Invalidate();
+                        return 0;
+                    }
+                    return 0;
+                }
+
+                // If editing Copies count via keyboard
+                if (m_printSettings.isEditingCopies) {
+                    if (wParam == VK_RETURN) {
+                        m_printSettings.CommitCopiesEdit();
+                        Invalidate();
+                        return 0;
+                    }
+                    if (wParam == VK_ESCAPE) {
+                        m_printSettings.CancelCopiesEdit();
+                        Invalidate();
+                        return 0;
+                    }
+                    if (wParam == VK_BACK) {
+                        if (!m_printSettings.copiesEditBuffer.empty()) {
+                            m_printSettings.copiesEditBuffer.pop_back();
+                            int val = m_printSettings.copiesEditBuffer.empty() ? 1 : _wtoi(m_printSettings.copiesEditBuffer.c_str());
+                            m_printSettings.copies = std::clamp(val, 1, 99);
+                            Invalidate();
+                        }
+                        return 0;
+                    }
+                    if ((wParam >= '0' && wParam <= '9') || (wParam >= VK_NUMPAD0 && wParam <= VK_NUMPAD9)) {
+                        wchar_t digit = (wParam >= '0' && wParam <= '9')
+                            ? static_cast<wchar_t>(wParam)
+                            : static_cast<wchar_t>('0' + (wParam - VK_NUMPAD0));
+                        if (m_printSettings.copiesEditBuffer.length() < 2) {
+                            m_printSettings.copiesEditBuffer += digit;
+                            int val = _wtoi(m_printSettings.copiesEditBuffer.c_str());
+                            m_printSettings.copies = std::clamp(val, 1, 99);
+                            Invalidate();
+                        }
+                        return 0;
+                    }
+                    return 0;
+                }
+
+                // Modal actions
+                if (wParam == VK_ESCAPE) {
+                    ClosePrintPreview();
+                    return 0;
+                }
+                if (wParam == VK_RETURN || (ctrlDown && wParam == 'P')) {
+                    ExecutePrintJob();
+                    return 0;
+                }
+
+                // STRICTLY SUPPRESS all other keys (arrows, Space, Delete, Home, End, R, L, etc.)
+                return 0;
+            }
+
+            // 2. Strict Modal Isolation: Help Overlay
+            if (m_showHelp) {
+                if (wParam == VK_ESCAPE || wParam == VK_F1) {
+                    ToggleHelp();
+                }
+                return 0;
+            }
 
             if (ctrlDown) {
                 switch (wParam) {
@@ -1174,12 +1345,18 @@ void AppWindow::OpenPrintPreview() {
     float vh = static_cast<float>(isRot90 ? tab->document->GetWidth() : tab->document->GetHeight());
     m_printSettings.orientation = (vw > vh) ? PrintOrientation::Landscape : PrintOrientation::Portrait;
 
+    m_printSettings.openDropdown = PrintDropdownState::None;
+    m_printSettings.isEditingCopies = false;
+    m_printSettings.copiesEditBuffer.clear();
     m_printSettings.isActive = true;
     m_showHelp = false;
     Invalidate();
 }
 
 void AppWindow::ClosePrintPreview() {
+    m_printSettings.openDropdown = PrintDropdownState::None;
+    m_printSettings.isEditingCopies = false;
+    m_printSettings.copiesEditBuffer.clear();
     m_printSettings.isActive = false;
     Invalidate();
 }
@@ -1189,32 +1366,6 @@ void AppWindow::HandlePrintUiClick(PrintUiId id) {
         case PrintUiId::CloseModal:
             ClosePrintPreview();
             break;
-        case PrintUiId::PrinterPrev:
-            if (!m_printSettings.printers.empty()) {
-                int count = static_cast<int>(m_printSettings.printers.size());
-                m_printSettings.selectedPrinterIdx = (m_printSettings.selectedPrinterIdx - 1 + count) % count;
-                Invalidate();
-            }
-            break;
-        case PrintUiId::PrinterNext:
-            if (!m_printSettings.printers.empty()) {
-                int count = static_cast<int>(m_printSettings.printers.size());
-                m_printSettings.selectedPrinterIdx = (m_printSettings.selectedPrinterIdx + 1) % count;
-                Invalidate();
-            }
-            break;
-        case PrintUiId::PaperPrev: {
-            int count = static_cast<int>(D2DRenderer::GetPaperPresets().size());
-            m_printSettings.paperPresetIdx = (m_printSettings.paperPresetIdx - 1 + count) % count;
-            Invalidate();
-            break;
-        }
-        case PrintUiId::PaperNext: {
-            int count = static_cast<int>(D2DRenderer::GetPaperPresets().size());
-            m_printSettings.paperPresetIdx = (m_printSettings.paperPresetIdx + 1) % count;
-            Invalidate();
-            break;
-        }
         case PrintUiId::OrientPortrait:
             m_printSettings.orientation = PrintOrientation::Portrait;
             Invalidate();
@@ -1246,18 +1397,6 @@ void AppWindow::HandlePrintUiClick(PrintUiId id) {
         case PrintUiId::MarginNone:
             m_printSettings.marginMode = PrintMarginMode::Borderless;
             Invalidate();
-            break;
-        case PrintUiId::CopiesMinus:
-            if (m_printSettings.copies > 1) {
-                m_printSettings.copies--;
-                Invalidate();
-            }
-            break;
-        case PrintUiId::CopiesPlus:
-            if (m_printSettings.copies < 99) {
-                m_printSettings.copies++;
-                Invalidate();
-            }
             break;
         case PrintUiId::SystemDialog:
             OpenSystemPrintDialog();

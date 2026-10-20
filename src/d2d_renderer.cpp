@@ -1167,16 +1167,22 @@ const std::vector<PaperPreset>& D2DRenderer::GetPaperPresets() {
 }
 
 PrintUiId D2DRenderer::HitTestPrintUi(POINT pt) {
+    m_hitDropdownIndex = -1;
+
     if (pt.x >= m_printCloseRect.left && pt.x <= m_printCloseRect.right &&
         pt.y >= m_printCloseRect.top && pt.y <= m_printCloseRect.bottom) {
         return PrintUiId::CloseModal;
     }
-    for (const auto& item : m_printHits) {
-        if (pt.x >= item.rect.left && pt.x <= item.rect.right &&
-            pt.y >= item.rect.top && pt.y <= item.rect.bottom) {
-            return item.id;
+
+    // Check hit items in reverse order so topmost popovers/dropdowns are hit-tested first!
+    for (auto it = m_printHits.rbegin(); it != m_printHits.rend(); ++it) {
+        if (pt.x >= it->rect.left && pt.x <= it->rect.right &&
+            pt.y >= it->rect.top && pt.y <= it->rect.bottom) {
+            m_hitDropdownIndex = it->itemIndex;
+            return it->id;
         }
     }
+
     if (pt.x >= m_printCardRect.left && pt.x <= m_printCardRect.right &&
         pt.y >= m_printCardRect.top && pt.y <= m_printCardRect.bottom) {
         return PrintUiId::CardBody;
@@ -1512,33 +1518,35 @@ void D2DRenderer::RenderPrintPreview(TabItem* activeTab, const PrintSettings& se
         curY += 18.0f * m_dpiScale;
     };
 
-    auto DrawStepper = [&](const wchar_t* valText, PrintUiId prevId, PrintUiId nextId) {
+    auto DrawDropdownSelector = [&](const wchar_t* valText, PrintUiId btnId, bool isOpen, D2D1_RECT_F& outRect) {
         float boxH = 28.0f * m_dpiScale;
-        float btnW = 28.0f * m_dpiScale;
-        D2D1_RECT_F boxRect = D2D1::RectF(sideX, curY, sideX + sideW, curY + boxH);
-        m_brushChrome->SetColor(D2D1::ColorF(0x27272a, 0.8f));
-        m_d2dContext->FillRoundedRectangle(D2D1::RoundedRect(boxRect, 4.0f, 4.0f), m_brushChrome.Get());
-        m_brushBorder->SetColor(D2D1::ColorF(0x3f3f46, 0.8f));
-        m_d2dContext->DrawRoundedRectangle(D2D1::RoundedRect(boxRect, 4.0f, 4.0f), m_brushBorder.Get(), 1.0f);
+        outRect = D2D1::RectF(sideX, curY, sideX + sideW, curY + boxH);
+        m_printHits.push_back({ btnId, -1, outRect });
 
-        D2D1_RECT_F prevR = D2D1::RectF(sideX, curY, sideX + btnW, curY + boxH);
-        D2D1_RECT_F nextR = D2D1::RectF(sideX + sideW - btnW, curY, sideX + sideW, curY + boxH);
-        D2D1_RECT_F textR = D2D1::RectF(sideX + btnW + 4.0f, curY, sideX + sideW - btnW - 4.0f, curY + boxH);
+        bool isHov = (mousePt.x >= outRect.left && mousePt.x <= outRect.right && mousePt.y >= outRect.top && mousePt.y <= outRect.bottom);
+        if (isOpen) {
+            m_brushChrome->SetColor(D2D1::ColorF(0x27272a, 1.0f));
+            m_brushBorder->SetColor(D2D1::ColorF(0x0284c7, 1.0f));
+        } else if (isHov) {
+            m_brushChrome->SetColor(D2D1::ColorF(0x27272a, 0.9f));
+            m_brushBorder->SetColor(D2D1::ColorF(0x475569, 0.9f));
+        } else {
+            m_brushChrome->SetColor(D2D1::ColorF(0x222226, 0.8f));
+            m_brushBorder->SetColor(D2D1::ColorF(0x3f3f46, 0.8f));
+        }
 
-        m_printHits.push_back({ prevId, prevR });
-        m_printHits.push_back({ nextId, nextR });
+        m_d2dContext->FillRoundedRectangle(D2D1::RoundedRect(outRect, 4.0f, 4.0f), m_brushChrome.Get());
+        m_d2dContext->DrawRoundedRectangle(D2D1::RoundedRect(outRect, 4.0f, 4.0f), m_brushBorder.Get(), isOpen ? 1.5f : 1.0f);
 
-        bool prevHov = (mousePt.x >= prevR.left && mousePt.x <= prevR.right && mousePt.y >= prevR.top && mousePt.y <= prevR.bottom);
-        bool nextHov = (mousePt.x >= nextR.left && mousePt.x <= nextR.right && mousePt.y >= nextR.top && mousePt.y <= nextR.bottom);
+        D2D1_RECT_F textR = D2D1::RectF(sideX + 10.0f * m_dpiScale, curY, sideX + sideW - 24.0f * m_dpiScale, curY + boxH);
+        D2D1_RECT_F chevR = D2D1::RectF(sideX + sideW - 22.0f * m_dpiScale, curY, sideX + sideW - 4.0f * m_dpiScale, curY + boxH);
 
-        m_brushText->SetColor(prevHov ? D2D1::ColorF(0x38bdf8) : D2D1::ColorF(0x94a3b8));
-        m_d2dContext->DrawText(L"◀", 1, m_formatKeycap.Get(), prevR, m_brushText.Get());
+        m_brushText->SetColor(isOpen ? D2D1::ColorF(0xffffff) : (isHov ? D2D1::ColorF(0xffffff) : D2D1::ColorF(0xf1f5f9)));
+        m_d2dContext->DrawText(valText, static_cast<UINT32>(wcslen(valText)), m_formatKeyDesc.Get(), textR, m_brushText.Get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
 
-        m_brushText->SetColor(nextHov ? D2D1::ColorF(0x38bdf8) : D2D1::ColorF(0x94a3b8));
-        m_d2dContext->DrawText(L"▶", 1, m_formatKeycap.Get(), nextR, m_brushText.Get());
-
-        m_brushText->SetColor(D2D1::ColorF(0xf1f5f9));
-        m_d2dContext->DrawText(valText, static_cast<UINT32>(wcslen(valText)), m_formatKeycap.Get(), textR, m_brushText.Get());
+        m_brushTextMuted->SetColor(isOpen ? D2D1::ColorF(0x38bdf8) : D2D1::ColorF(0x94a3b8));
+        const wchar_t* chev = isOpen ? L"▴" : L"▾";
+        m_d2dContext->DrawText(chev, 1, m_formatKeycap.Get(), chevR, m_brushTextMuted.Get());
 
         curY += boxH + 8.0f * m_dpiScale;
     };
@@ -1550,7 +1558,7 @@ void D2DRenderer::RenderPrintPreview(TabItem* activeTab, const PrintSettings& se
         for (size_t i = 0; i < pills.size(); ++i) {
             float px = sideX + i * (pillW + spacing);
             D2D1_RECT_F pRect = D2D1::RectF(px, curY, px + pillW, curY + pillH);
-            m_printHits.push_back({ pills[i].second, pRect });
+            m_printHits.push_back({ pills[i].second, -1, pRect });
 
             bool isActive = (static_cast<int>(i) == activeIdx);
             bool isHov = (mousePt.x >= pRect.left && mousePt.x <= pRect.right && mousePt.y >= pRect.top && mousePt.y <= pRect.bottom);
@@ -1572,39 +1580,90 @@ void D2DRenderer::RenderPrintPreview(TabItem* activeTab, const PrintSettings& se
         curY += pillH + 8.0f * m_dpiScale;
     };
 
-    // Printer
+    // 1. Printer Dropdown Box
+    D2D1_RECT_F printerBoxRect;
     std::wstring printerName = settings.printers.empty() ? L"Default Printer" : settings.printers[settings.selectedPrinterIdx % settings.printers.size()];
     DrawSectionLabel(L"PRINTER");
-    DrawStepper(printerName.c_str(), PrintUiId::PrinterPrev, PrintUiId::PrinterNext);
+    DrawDropdownSelector(printerName.c_str(), PrintUiId::PrinterDropdownBtn, settings.openDropdown == PrintDropdownState::Printer, printerBoxRect);
 
-    // Paper Size
+    // 2. Paper Size Dropdown Box
+    D2D1_RECT_F paperBoxRect;
     DrawSectionLabel(L"PAPER SIZE");
-    DrawStepper(preset.name, PrintUiId::PaperPrev, PrintUiId::PaperNext);
+    DrawDropdownSelector(preset.name, PrintUiId::PaperDropdownBtn, settings.openDropdown == PrintDropdownState::PaperSize, paperBoxRect);
 
-    // Orientation
+    // 3. Orientation
     DrawSectionLabel(L"ORIENTATION");
     DrawPills({ { L"Portrait", PrintUiId::OrientPortrait }, { L"Landscape", PrintUiId::OrientLandscape } }, settings.orientation == PrintOrientation::Portrait ? 0 : 1);
 
-    // Scale Mode
+    // 4. Scale Mode
     DrawSectionLabel(L"SCALE MODE");
     DrawPills({ { L"Fit", PrintUiId::ScaleFit }, { L"Fill", PrintUiId::ScaleFill }, { L"1:1", PrintUiId::ScaleActual } }, settings.scaleMode == PrintScaleMode::FitToPage ? 0 : (settings.scaleMode == PrintScaleMode::FillPage ? 1 : 2));
 
-    // Margins
+    // 5. Margins
     DrawSectionLabel(L"MARGINS");
     DrawPills({ { L"Normal", PrintUiId::MarginNormal }, { L"Narrow", PrintUiId::MarginNarrow }, { L"None", PrintUiId::MarginNone } }, settings.marginMode == PrintMarginMode::Normal ? 0 : (settings.marginMode == PrintMarginMode::Narrow ? 1 : 2));
 
-    // Copies
-    wchar_t szCopies[32];
-    swprintf_s(szCopies, L"%d", settings.copies);
+    // 6. Copies Stepper + Keyboard Input Box
     DrawSectionLabel(L"COPIES");
-    DrawStepper(szCopies, PrintUiId::CopiesMinus, PrintUiId::CopiesPlus);
+    float boxH = 28.0f * m_dpiScale;
+    float btnW = 28.0f * m_dpiScale;
 
+    D2D1_RECT_F prevR = D2D1::RectF(sideX, curY, sideX + btnW, curY + boxH);
+    D2D1_RECT_F nextR = D2D1::RectF(sideX + sideW - btnW, curY, sideX + sideW, curY + boxH);
+    D2D1_RECT_F inputR = D2D1::RectF(sideX + btnW + 4.0f * m_dpiScale, curY, sideX + sideW - btnW - 4.0f * m_dpiScale, curY + boxH);
+
+    m_printHits.push_back({ PrintUiId::CopiesMinus, -1, prevR });
+    m_printHits.push_back({ PrintUiId::CopiesInputBox, -1, inputR });
+    m_printHits.push_back({ PrintUiId::CopiesPlus, -1, nextR });
+
+    bool prevHov = (mousePt.x >= prevR.left && mousePt.x <= prevR.right && mousePt.y >= prevR.top && mousePt.y <= prevR.bottom);
+    bool nextHov = (mousePt.x >= nextR.left && mousePt.x <= nextR.right && mousePt.y >= nextR.top && mousePt.y <= nextR.bottom);
+    bool inputHov = (mousePt.x >= inputR.left && mousePt.x <= inputR.right && mousePt.y >= inputR.top && mousePt.y <= inputR.bottom);
+
+    // Minus Button
+    m_brushChrome->SetColor(prevHov ? D2D1::ColorF(0x334155, 0.9f) : D2D1::ColorF(0x27272a, 0.8f));
+    m_d2dContext->FillRoundedRectangle(D2D1::RoundedRect(prevR, 4.0f, 4.0f), m_brushChrome.Get());
+    m_brushBorder->SetColor(D2D1::ColorF(0x3f3f46, 0.8f));
+    m_d2dContext->DrawRoundedRectangle(D2D1::RoundedRect(prevR, 4.0f, 4.0f), m_brushBorder.Get(), 1.0f);
+    m_brushText->SetColor(prevHov ? D2D1::ColorF(0x38bdf8) : D2D1::ColorF(0x94a3b8));
+    m_d2dContext->DrawText(L"−", 1, m_formatKeycap.Get(), prevR, m_brushText.Get());
+
+    // Plus Button
+    m_brushChrome->SetColor(nextHov ? D2D1::ColorF(0x334155, 0.9f) : D2D1::ColorF(0x27272a, 0.8f));
+    m_d2dContext->FillRoundedRectangle(D2D1::RoundedRect(nextR, 4.0f, 4.0f), m_brushChrome.Get());
+    m_d2dContext->DrawRoundedRectangle(D2D1::RoundedRect(nextR, 4.0f, 4.0f), m_brushBorder.Get(), 1.0f);
+    m_brushText->SetColor(nextHov ? D2D1::ColorF(0x38bdf8) : D2D1::ColorF(0x94a3b8));
+    m_d2dContext->DrawText(L"+", 1, m_formatKeycap.Get(), nextR, m_brushText.Get());
+
+    // Copies Text / Input Box
+    if (settings.isEditingCopies) {
+        m_brushChrome->SetColor(D2D1::ColorF(0x0f172a, 1.0f));
+        m_d2dContext->FillRoundedRectangle(D2D1::RoundedRect(inputR, 4.0f, 4.0f), m_brushChrome.Get());
+        m_brushBorder->SetColor(D2D1::ColorF(0x0284c7, 1.0f));
+        m_d2dContext->DrawRoundedRectangle(D2D1::RoundedRect(inputR, 4.0f, 4.0f), m_brushBorder.Get(), 1.5f);
+
+        std::wstring displayStr = settings.copiesEditBuffer.empty() ? L"|" : (settings.copiesEditBuffer + L"|");
+        m_brushText->SetColor(D2D1::ColorF(0x38bdf8));
+        m_d2dContext->DrawText(displayStr.c_str(), static_cast<UINT32>(displayStr.length()), m_formatKeycap.Get(), inputR, m_brushText.Get());
+    } else {
+        m_brushChrome->SetColor(inputHov ? D2D1::ColorF(0x27272a, 0.9f) : D2D1::ColorF(0x222226, 0.8f));
+        m_d2dContext->FillRoundedRectangle(D2D1::RoundedRect(inputR, 4.0f, 4.0f), m_brushChrome.Get());
+        m_brushBorder->SetColor(inputHov ? D2D1::ColorF(0x475569, 0.9f) : D2D1::ColorF(0x3f3f46, 0.8f));
+        m_d2dContext->DrawRoundedRectangle(D2D1::RoundedRect(inputR, 4.0f, 4.0f), m_brushBorder.Get(), 1.0f);
+
+        wchar_t szCopies[32];
+        swprintf_s(szCopies, L"%d", settings.copies);
+        m_brushText->SetColor(D2D1::ColorF(0xf1f5f9));
+        m_d2dContext->DrawText(szCopies, static_cast<UINT32>(wcslen(szCopies)), m_formatKeycap.Get(), inputR, m_brushText.Get());
+    }
+
+    curY += boxH + 8.0f * m_dpiScale;
     curY += 4.0f * m_dpiScale;
 
     // Action Buttons
     float btnH = 30.0f * m_dpiScale;
     D2D1_RECT_F sysRect = D2D1::RectF(sideX, curY, sideX + sideW, curY + btnH);
-    m_printHits.push_back({ PrintUiId::SystemDialog, sysRect });
+    m_printHits.push_back({ PrintUiId::SystemDialog, -1, sysRect });
     bool sysHov = (mousePt.x >= sysRect.left && mousePt.x <= sysRect.right && mousePt.y >= sysRect.top && mousePt.y <= sysRect.bottom);
     m_brushChrome->SetColor(sysHov ? D2D1::ColorF(0x334155, 0.9f) : D2D1::ColorF(0x27272a, 0.8f));
     m_d2dContext->FillRoundedRectangle(D2D1::RoundedRect(sysRect, 4.0f, 4.0f), m_brushChrome.Get());
@@ -1618,11 +1677,105 @@ void D2DRenderer::RenderPrintPreview(TabItem* activeTab, const PrintSettings& se
 
     float printBtnH = 34.0f * m_dpiScale;
     D2D1_RECT_F printRect = D2D1::RectF(sideX, curY, sideX + sideW, curY + printBtnH);
-    m_printHits.push_back({ PrintUiId::ExecutePrint, printRect });
+    m_printHits.push_back({ PrintUiId::ExecutePrint, -1, printRect });
     bool printHov = (mousePt.x >= printRect.left && mousePt.x <= printRect.right && mousePt.y >= printRect.top && mousePt.y <= printRect.bottom);
     m_brushChrome->SetColor(printHov ? D2D1::ColorF(0x0284c7, 1.0f) : D2D1::ColorF(0x0369a1, 0.95f));
     m_d2dContext->FillRoundedRectangle(D2D1::RoundedRect(printRect, 6.0f, 6.0f), m_brushChrome.Get());
     m_brushText->SetColor(D2D1::ColorF(0xffffff));
     const wchar_t printText[] = L"🖨️ Print (Enter)";
     m_d2dContext->DrawText(printText, static_cast<UINT32>(wcslen(printText)), m_formatKeycap.Get(), printRect, m_brushText.Get());
+
+    // 7. Floating Dropdown Popover Lists (Rendered last with topmost z-index)
+    if (settings.openDropdown == PrintDropdownState::Printer && !settings.printers.empty()) {
+        float itemH = 28.0f * m_dpiScale;
+        float listH = itemH * settings.printers.size() + 8.0f * m_dpiScale;
+        float listY = printerBoxRect.bottom + 2.0f;
+        D2D1_RECT_F listRect = D2D1::RectF(sideX, listY, sideX + sideW, listY + listH);
+        m_dropdownListRect = listRect;
+
+        // Shadow
+        m_brushBg->SetColor(D2D1::ColorF(0x000000, 0.65f));
+        m_d2dContext->FillRectangle(D2D1::RectF(sideX + 3.0f, listY + 3.0f, sideX + sideW + 3.0f, listY + listH + 3.0f), m_brushBg.Get());
+
+        // Card
+        m_brushChrome->SetColor(D2D1::ColorF(0x18181b, 0.98f));
+        m_d2dContext->FillRoundedRectangle(D2D1::RoundedRect(listRect, 6.0f, 6.0f), m_brushChrome.Get());
+        m_brushBorder->SetColor(D2D1::ColorF(0x475569, 0.95f));
+        m_d2dContext->DrawRoundedRectangle(D2D1::RoundedRect(listRect, 6.0f, 6.0f), m_brushBorder.Get(), 1.2f);
+
+        for (size_t i = 0; i < settings.printers.size(); ++i) {
+            float iy = listY + 4.0f * m_dpiScale + i * itemH;
+            D2D1_RECT_F itemR = D2D1::RectF(sideX + 4.0f * m_dpiScale, iy, sideX + sideW - 4.0f * m_dpiScale, iy + itemH);
+            m_printHits.push_back({ PrintUiId::DropdownItem, static_cast<int>(i), itemR });
+
+            bool isHov = (mousePt.x >= itemR.left && mousePt.x <= itemR.right && mousePt.y >= itemR.top && mousePt.y <= itemR.bottom);
+            bool isSel = (static_cast<int>(i) == settings.selectedPrinterIdx);
+
+            if (isHov) {
+                m_brushChrome->SetColor(D2D1::ColorF(0x334155, 0.95f));
+                m_d2dContext->FillRoundedRectangle(D2D1::RoundedRect(itemR, 4.0f, 4.0f), m_brushChrome.Get());
+            } else if (isSel) {
+                m_brushChrome->SetColor(D2D1::ColorF(0x1e293b, 0.7f));
+                m_d2dContext->FillRoundedRectangle(D2D1::RoundedRect(itemR, 4.0f, 4.0f), m_brushChrome.Get());
+            }
+
+            D2D1_RECT_F textR = D2D1::RectF(itemR.left + 22.0f * m_dpiScale, itemR.top, itemR.right - 8.0f * m_dpiScale, itemR.bottom);
+            D2D1_RECT_F checkR = D2D1::RectF(itemR.left + 4.0f * m_dpiScale, itemR.top, itemR.left + 20.0f * m_dpiScale, itemR.bottom);
+
+            if (isSel) {
+                m_brushAccent->SetColor(D2D1::ColorF(0x38bdf8));
+                m_d2dContext->DrawText(L"✓", 1, m_formatKeycap.Get(), checkR, m_brushAccent.Get());
+            }
+
+            m_brushText->SetColor(isHov ? D2D1::ColorF(0xffffff) : (isSel ? D2D1::ColorF(0xf1f5f9) : D2D1::ColorF(0x94a3b8)));
+            m_d2dContext->DrawText(settings.printers[i].c_str(), static_cast<UINT32>(settings.printers[i].length()), m_formatKeyDesc.Get(), textR, m_brushText.Get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        }
+    } else if (settings.openDropdown == PrintDropdownState::PaperSize) {
+        float itemH = 26.0f * m_dpiScale;
+        float listH = itemH * presets.size() + 8.0f * m_dpiScale;
+        float listY = paperBoxRect.bottom + 2.0f;
+        if (listY + listH > cardY + cardH - 12.0f * m_dpiScale) {
+            listY = cardY + cardH - 12.0f * m_dpiScale - listH;
+        }
+        D2D1_RECT_F listRect = D2D1::RectF(sideX, listY, sideX + sideW, listY + listH);
+        m_dropdownListRect = listRect;
+
+        m_brushBg->SetColor(D2D1::ColorF(0x000000, 0.65f));
+        m_d2dContext->FillRectangle(D2D1::RectF(sideX + 3.0f, listY + 3.0f, sideX + sideW + 3.0f, listY + listH + 3.0f), m_brushBg.Get());
+
+        m_brushChrome->SetColor(D2D1::ColorF(0x18181b, 0.98f));
+        m_d2dContext->FillRoundedRectangle(D2D1::RoundedRect(listRect, 6.0f, 6.0f), m_brushChrome.Get());
+        m_brushBorder->SetColor(D2D1::ColorF(0x475569, 0.95f));
+        m_d2dContext->DrawRoundedRectangle(D2D1::RoundedRect(listRect, 6.0f, 6.0f), m_brushBorder.Get(), 1.2f);
+
+        for (size_t i = 0; i < presets.size(); ++i) {
+            float iy = listY + 4.0f * m_dpiScale + i * itemH;
+            D2D1_RECT_F itemR = D2D1::RectF(sideX + 4.0f * m_dpiScale, iy, sideX + sideW - 4.0f * m_dpiScale, iy + itemH);
+            m_printHits.push_back({ PrintUiId::DropdownItem, static_cast<int>(i), itemR });
+
+            bool isHov = (mousePt.x >= itemR.left && mousePt.x <= itemR.right && mousePt.y >= itemR.top && mousePt.y <= itemR.bottom);
+            bool isSel = (static_cast<int>(i) == presetIdx);
+
+            if (isHov) {
+                m_brushChrome->SetColor(D2D1::ColorF(0x334155, 0.95f));
+                m_d2dContext->FillRoundedRectangle(D2D1::RoundedRect(itemR, 4.0f, 4.0f), m_brushChrome.Get());
+            } else if (isSel) {
+                m_brushChrome->SetColor(D2D1::ColorF(0x1e293b, 0.7f));
+                m_d2dContext->FillRoundedRectangle(D2D1::RoundedRect(itemR, 4.0f, 4.0f), m_brushChrome.Get());
+            }
+
+            D2D1_RECT_F textR = D2D1::RectF(itemR.left + 22.0f * m_dpiScale, itemR.top, itemR.right - 8.0f * m_dpiScale, itemR.bottom);
+            D2D1_RECT_F checkR = D2D1::RectF(itemR.left + 4.0f * m_dpiScale, itemR.top, itemR.left + 20.0f * m_dpiScale, itemR.bottom);
+
+            if (isSel) {
+                m_brushAccent->SetColor(D2D1::ColorF(0x38bdf8));
+                m_d2dContext->DrawText(L"✓", 1, m_formatKeycap.Get(), checkR, m_brushAccent.Get());
+            }
+
+            m_brushText->SetColor(isHov ? D2D1::ColorF(0xffffff) : (isSel ? D2D1::ColorF(0xf1f5f9) : D2D1::ColorF(0x94a3b8)));
+            m_d2dContext->DrawText(presets[i].name, static_cast<UINT32>(wcslen(presets[i].name)), m_formatKeyDesc.Get(), textR, m_brushText.Get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        }
+    } else {
+        m_dropdownListRect = { 0, 0, 0, 0 };
+    }
 }

@@ -27,6 +27,12 @@ enum class PrintOrientation { Portrait, Landscape };
 enum class PrintScaleMode   { FitToPage, FillPage, ActualSize };
 enum class PrintMarginMode  { Normal, Narrow, Borderless };
 
+enum class PrintDropdownState {
+    None,
+    Printer,
+    PaperSize
+};
+
 struct PaperPreset {
     short dmPaperCode;
     const wchar_t* name;
@@ -43,16 +49,36 @@ struct PrintSettings {
     PrintScaleMode scaleMode = PrintScaleMode::FitToPage;
     PrintMarginMode marginMode = PrintMarginMode::Normal;
     int copies = 1;
+
+    // Dropdown & Input State
+    PrintDropdownState openDropdown = PrintDropdownState::None;
+    bool isEditingCopies = false;
+    std::wstring copiesEditBuffer;
+
+    void CommitCopiesEdit() {
+        if (isEditingCopies) {
+            if (!copiesEditBuffer.empty()) {
+                int val = _wtoi(copiesEditBuffer.c_str());
+                copies = std::clamp(val, 1, 99);
+            }
+            isEditingCopies = false;
+            copiesEditBuffer.clear();
+        }
+    }
+
+    void CancelCopiesEdit() {
+        isEditingCopies = false;
+        copiesEditBuffer.clear();
+    }
 };
 
 enum class PrintUiId {
     None,
     CloseModal,
     CardBody,
-    PrinterPrev,
-    PrinterNext,
-    PaperPrev,
-    PaperNext,
+    PrinterDropdownBtn,
+    PaperDropdownBtn,
+    DropdownItem,
     OrientPortrait,
     OrientLandscape,
     ScaleFit,
@@ -62,6 +88,7 @@ enum class PrintUiId {
     MarginNarrow,
     MarginNone,
     CopiesMinus,
+    CopiesInputBox,
     CopiesPlus,
     SystemDialog,
     ExecutePrint
@@ -69,6 +96,7 @@ enum class PrintUiId {
 
 struct PrintHitBox {
     PrintUiId id;
+    int itemIndex = -1;
     D2D1_RECT_F rect;
 };
 
@@ -103,6 +131,7 @@ public:
     bool HitTestHelpCard(POINT pt);
     int HitTestRecentFile(POINT pt, std::wstring& outPath);
     PrintUiId HitTestPrintUi(POINT pt);
+    int GetHitDropdownIndex() const { return m_hitDropdownIndex; }
 
     float GetDpiScale() const { return m_dpiScale; }
     void UpdateDpi(float dpi);
@@ -162,6 +191,8 @@ private:
     std::vector<PrintHitBox> m_printHits;
     D2D1_RECT_F m_printCardRect = { 0, 0, 0, 0 };
     D2D1_RECT_F m_printCloseRect = { 0, 0, 0, 0 };
+    D2D1_RECT_F m_dropdownListRect = { 0, 0, 0, 0 };
+    int m_hitDropdownIndex = -1;
 
     bool CreateDeviceIndependentResources();
     bool CreateDeviceResources();
