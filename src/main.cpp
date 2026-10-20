@@ -80,6 +80,8 @@ int WINAPI wWinMain(HINSTANCE /*hInstance*/, HINSTANCE /*hPrevInstance*/, PWSTR 
         }
     }
 
+    AppWindow::InitializeDarkMode();
+
     AppWindow app;
     if (!app.Create(nCmdShow, filesToOpen)) {
         CloseHandle(hMutex);

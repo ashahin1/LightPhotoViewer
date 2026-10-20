@@ -5,6 +5,89 @@
 static const wchar_t* WND_CLASS_NAME = L"LightPhotoViewer_WndClass";
 static const UINT_PTR TIMER_ANIM_AND_HUD = 1;
 
+namespace {
+
+enum class PreferredAppMode {
+    Default = 0,
+    AllowDark = 1,
+    ForceDark = 2,
+    ForceLight = 3,
+    Max = 4
+};
+
+using fnSetPreferredAppMode = PreferredAppMode (WINAPI *)(PreferredAppMode appMode);
+using fnAllowDarkModeForWindow = BOOL (WINAPI *)(HWND hWnd, BOOL allow);
+using fnFlushMenuThemes = void (WINAPI *)();
+using fnRefreshImmersiveColorPolicyState = void (WINAPI *)();
+
+static fnSetPreferredAppMode s_fnSetPreferredAppMode = nullptr;
+static fnAllowDarkModeForWindow s_fnAllowDarkModeForWindow = nullptr;
+static fnFlushMenuThemes s_fnFlushMenuThemes = nullptr;
+static fnRefreshImmersiveColorPolicyState s_fnRefreshImmersiveColorPolicyState = nullptr;
+
+} // namespace
+
+void AppWindow::InitializeDarkMode() {
+    static bool s_initialized = false;
+    if (s_initialized) return;
+    s_initialized = true;
+
+    HMODULE hUxTheme = GetModuleHandleW(L"uxtheme.dll");
+    if (!hUxTheme) {
+        hUxTheme = LoadLibraryExW(L"uxtheme.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    }
+    if (hUxTheme) {
+        s_fnSetPreferredAppMode = reinterpret_cast<fnSetPreferredAppMode>(GetProcAddress(hUxTheme, MAKEINTRESOURCEA(135)));
+        s_fnAllowDarkModeForWindow = reinterpret_cast<fnAllowDarkModeForWindow>(GetProcAddress(hUxTheme, MAKEINTRESOURCEA(133)));
+        s_fnFlushMenuThemes = reinterpret_cast<fnFlushMenuThemes>(GetProcAddress(hUxTheme, MAKEINTRESOURCEA(136)));
+        s_fnRefreshImmersiveColorPolicyState = reinterpret_cast<fnRefreshImmersiveColorPolicyState>(GetProcAddress(hUxTheme, MAKEINTRESOURCEA(104)));
+
+        if (s_fnSetPreferredAppMode) {
+            s_fnSetPreferredAppMode(PreferredAppMode::AllowDark);
+        }
+        if (s_fnFlushMenuThemes) {
+            s_fnFlushMenuThemes();
+        }
+    }
+}
+
+bool AppWindow::IsSystemDarkMode() {
+    DWORD data = 0;
+    DWORD size = sizeof(data);
+    HKEY hKey = nullptr;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER,
+        L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+        0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        if (RegQueryValueExW(hKey, L"AppsUseLightTheme", nullptr, nullptr,
+            reinterpret_cast<LPBYTE>(&data), &size) == ERROR_SUCCESS) {
+            RegCloseKey(hKey);
+            return (data == 0); // 0 = Dark Mode, 1 = Light Mode
+        }
+        RegCloseKey(hKey);
+    }
+    return true; // Default to dark mode for photo viewer
+}
+
+void AppWindow::UpdateTheme() {
+    if (!m_hWnd) return;
+
+    BOOL isDark = IsSystemDarkMode();
+
+    // DWMWA_USE_IMMERSIVE_DARK_MODE is 20 in Windows 10 2004+ and Windows 11
+    BOOL val = isDark ? TRUE : FALSE;
+    DwmSetWindowAttribute(m_hWnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &val, sizeof(val));
+    constexpr DWORD DWMWA_USE_IMMERSIVE_DARK_MODE_OLD = 19;
+    DwmSetWindowAttribute(m_hWnd, DWMWA_USE_IMMERSIVE_DARK_MODE_OLD, &val, sizeof(val));
+
+    if (s_fnAllowDarkModeForWindow) {
+        s_fnAllowDarkModeForWindow(m_hWnd, isDark);
+    }
+
+    if (s_fnFlushMenuThemes) {
+        s_fnFlushMenuThemes();
+    }
+}
+
 AppWindow::AppWindow() {
     m_lastMouseMoveTick = GetTickCount64();
 }
@@ -30,6 +113,8 @@ LRESULT CALLBACK AppWindow::WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
 }
 
 bool AppWindow::Create(int nCmdShow, const std::vector<std::wstring>& initialFiles) {
+    InitializeDarkMode();
+
     HINSTANCE hInstance = GetModuleHandle(nullptr);
 
     WNDCLASSEXW wc = {};
@@ -67,9 +152,8 @@ bool AppWindow::Create(int nCmdShow, const std::vector<std::wstring>& initialFil
 
     if (!m_hWnd) return false;
 
-    // Enable Windows 10/11 Immersive Dark Mode for title bar
-    BOOL darkMode = TRUE;
-    DwmSetWindowAttribute(m_hWnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &darkMode, sizeof(darkMode));
+    // Synchronize title bar and menus with system dark/light theme
+    UpdateTheme();
 
     // Initialize Direct2D Renderer
     if (!m_renderer.Initialize(m_hWnd)) {
@@ -233,6 +317,10 @@ void AppWindow::DeleteCurrentFile() {
 }
 
 void AppWindow::ShowContextMenu(int x, int y) {
+    if (s_fnFlushMenuThemes) {
+        s_fnFlushMenuThemes();
+    }
+
     HMENU hMenu = CreatePopupMenu();
     if (!hMenu) return;
 
@@ -1236,6 +1324,21 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
                     Invalidate();
                 }
             }
+            return 0;
+        }
+
+        case WM_SETTINGCHANGE: {
+            if (s_fnRefreshImmersiveColorPolicyState) {
+                s_fnRefreshImmersiveColorPolicyState();
+            }
+            UpdateTheme();
+            Invalidate();
+            return 0;
+        }
+
+        case WM_THEMECHANGED: {
+            UpdateTheme();
+            Invalidate();
             return 0;
         }
 

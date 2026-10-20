@@ -14,6 +14,8 @@ public:
 
     static void RegisterShellAssociations();
     static void UnregisterShellAssociations();
+    static void InitializeDarkMode();
+    static bool IsSystemDarkMode();
 
 private:
     static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -52,6 +54,9 @@ private:
     void DeleteCurrentFile();
     void ShowContextMenu(int x, int y);
     void HandleHudAction(HudButtonId id);
+
+    // System Theme Management
+    void UpdateTheme();
 
     void OpenPrintPreview();
     void ClosePrintPreview();
