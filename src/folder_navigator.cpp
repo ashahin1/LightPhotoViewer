@@ -1,5 +1,6 @@
 #include "pch.hpp"
 #include "folder_navigator.hpp"
+#include "image_engine.hpp"
 
 FolderNavigator::FolderNavigator() {
     m_stopWorker = false;
@@ -19,11 +20,14 @@ bool FolderNavigator::IsSupportedExtension(const std::wstring& ext) {
     std::wstring lower = ext;
     std::transform(lower.begin(), lower.end(), lower.begin(), ::towlower);
 
-    return (lower == L".jpg"  || lower == L".jpeg" || lower == L".jpe" ||
-            lower == L".png"  || lower == L".gif"  || lower == L".webp" ||
-            lower == L".bmp"  || lower == L".dib"  || lower == L".ico"  ||
-            lower == L".tiff" || lower == L".tif"  || lower == L".avif" ||
-            lower == L".svg"  || lower == L".heic" || lower == L".heif");
+    if (lower == L".jpg"  || lower == L".jpeg" || lower == L".jpe" ||
+        lower == L".png"  || lower == L".gif"  || lower == L".webp" ||
+        lower == L".bmp"  || lower == L".dib"  || lower == L".ico"  ||
+        lower == L".tiff" || lower == L".tif"  || lower == L".avif" ||
+        lower == L".svg"  || lower == L".heic" || lower == L".heif") {
+        return true;
+    }
+    return ImageEngine::IsRawExtension(lower);
 }
 
 void FolderNavigator::ScanFolder(const std::wstring& folderPath, const std::wstring& initialFile) {
@@ -70,6 +74,19 @@ void FolderNavigator::ScanFolder(const std::wstring& folderPath, const std::wstr
         if (_wcsicmp(m_files[i].c_str(), initialFile.c_str()) == 0) {
             m_currentIndex = static_cast<int>(i);
             break;
+        }
+    }
+
+    if (m_currentIndex < 0 && !initialFile.empty()) {
+        m_files.push_back(initialFile);
+        std::sort(m_files.begin(), m_files.end(), [](const std::wstring& a, const std::wstring& b) {
+            return StrCmpLogicalW(a.c_str(), b.c_str()) < 0;
+        });
+        for (size_t i = 0; i < m_files.size(); ++i) {
+            if (_wcsicmp(m_files[i].c_str(), initialFile.c_str()) == 0) {
+                m_currentIndex = static_cast<int>(i);
+                break;
+            }
         }
     }
 

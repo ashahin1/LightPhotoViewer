@@ -50,6 +50,7 @@ public:
 
     std::shared_ptr<ImageDocument> LoadFromFile(const std::wstring& filePath);
     bool CopyToClipboard(HWND hWnd, const FrameData& frame);
+    static bool IsRawExtension(const std::wstring& ext);
 
 private:
     ImageEngine() = default;
@@ -61,4 +62,5 @@ private:
     void ParseExifMetadata(IWICMetadataQueryReader* reader, ImageMetadata& meta);
     WICBitmapTransformOptions GetExifTransform(IWICMetadataQueryReader* reader);
     bool LoadSvgMetadata(const std::wstring& filePath, ImageMetadata& meta);
+    bool LoadRawEmbeddedPreview(IWICImagingFactory* factory, const std::wstring& filePath, ImageDocument& doc);
 };

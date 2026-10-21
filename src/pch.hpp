@@ -38,6 +38,7 @@
 #include <atomic>
 #include <filesystem>
 #include <unordered_map>
+#include <unordered_set>
 #include <deque>
 #include <functional>
 

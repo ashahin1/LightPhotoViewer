@@ -267,7 +267,8 @@ void AppWindow::OpenFileDialog() {
     ofn.lStructSize = sizeof(OPENFILENAMEW);
     ofn.hwndOwner = m_hWnd;
     ofn.lpstrFilter =
-        L"All Supported Images (*.jpg;*.png;*.webp;*.gif;*.bmp;*.tiff;*.avif;*.svg)\0*.jpg;*.jpeg;*.jpe;*.png;*.webp;*.gif;*.bmp;*.dib;*.tiff;*.tif;*.avif;*.svg;*.heic\0"
+        L"All Supported Images (*.jpg;*.png;*.webp;*.gif;*.bmp;*.tiff;*.avif;*.svg;*.cr2;*.cr3;*.nef;*.arw;*.dng;...)\0*.jpg;*.jpeg;*.jpe;*.png;*.webp;*.gif;*.bmp;*.dib;*.tiff;*.tif;*.avif;*.svg;*.heic;*.cr2;*.cr3;*.crw;*.nef;*.nrw;*.arw;*.srf;*.sr2;*.dng;*.raf;*.orf;*.ori;*.rw2;*.pef;*.ptx;*.3fr;*.fff;*.rwl;*.x3f;*.srw;*.raw;*.kdc;*.dcr;*.mrw;*.mos;*.erf;*.mef\0"
+        L"Camera RAW Images (*.cr2;*.cr3;*.nef;*.arw;*.dng;*.raf;*.orf;*.rw2;*.pef;*.raw)\0*.cr2;*.cr3;*.crw;*.nef;*.nrw;*.arw;*.srf;*.sr2;*.dng;*.raf;*.orf;*.ori;*.rw2;*.pef;*.ptx;*.3fr;*.fff;*.rwl;*.x3f;*.srw;*.raw;*.kdc;*.dcr;*.mrw;*.mos;*.erf;*.mef\0"
         L"JPEG Images (*.jpg;*.jpeg)\0*.jpg;*.jpeg;*.jpe\0"
         L"PNG Images (*.png)\0*.png\0"
         L"WebP Images (*.webp)\0*.webp\0"
@@ -1357,7 +1358,9 @@ void AppWindow::RegisterShellAssociations() {
 
     const wchar_t* extensions[] = {
         L".jpg", L".jpeg", L".png", L".webp", L".gif",
-        L".bmp", L".ico", L".tiff", L".tif", L".avif", L".svg"
+        L".bmp", L".ico", L".tiff", L".tif", L".avif", L".svg",
+        L".dng", L".cr2", L".cr3", L".nef", L".arw", L".raf",
+        L".orf", L".rw2", L".pef", L".raw"
     };
 
     const wchar_t* progId = L"LightPhotoViewer.Image";
@@ -1405,7 +1408,9 @@ void AppWindow::UnregisterShellAssociations() {
 
     const wchar_t* extensions[] = {
         L".jpg", L".jpeg", L".png", L".webp", L".gif",
-        L".bmp", L".ico", L".tiff", L".tif", L".avif", L".svg"
+        L".bmp", L".ico", L".tiff", L".tif", L".avif", L".svg",
+        L".dng", L".cr2", L".cr3", L".nef", L".arw", L".raf",
+        L".orf", L".rw2", L".pef", L".raw"
     };
 
     for (const auto& ext : extensions) {

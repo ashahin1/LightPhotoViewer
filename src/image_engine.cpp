@@ -36,7 +36,36 @@ IWICImagingFactory* ImageEngine::GetThreadWicFactory() {
     return t_factory.Get();
 }
 
-static std::wstring FormatFromContainer(const GUID& guid) {
+bool ImageEngine::IsRawExtension(const std::wstring& ext) {
+    std::wstring lower = ext;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::towlower);
+    if (!lower.empty() && lower[0] == L'.') {
+        lower = lower.substr(1);
+    }
+    static const std::unordered_set<std::wstring> s_rawExts = {
+        L"cr2", L"cr3", L"crw",
+        L"nef", L"nrw",
+        L"arw", L"srf", L"sr2",
+        L"dng",
+        L"raf",
+        L"orf", L"ori",
+        L"rw2",
+        L"pef", L"ptx",
+        L"3fr", L"fff",
+        L"rwl",
+        L"x3f",
+        L"srw",
+        L"raw",
+        L"kdc", L"dcr",
+        L"mrw",
+        L"mos",
+        L"erf",
+        L"mef"
+    };
+    return s_rawExts.find(lower) != s_rawExts.end();
+}
+
+static std::wstring FormatFromContainer(const GUID& guid, const std::wstring& ext = L"") {
     if (IsEqualGUID(guid, GUID_ContainerFormatBmp)) return L"BMP";
     if (IsEqualGUID(guid, GUID_ContainerFormatPng)) return L"PNG";
     if (IsEqualGUID(guid, GUID_ContainerFormatIco)) return L"ICO";
@@ -47,7 +76,33 @@ static std::wstring FormatFromContainer(const GUID& guid) {
     if (IsEqualGUID(guid, GUID_ContainerFormatDds)) return L"DDS";
     if (IsEqualGUID(guid, GUID_ContainerFormatWebp)) return L"WebP";
     if (IsEqualGUID(guid, GUID_ContainerFormatHeif)) return L"HEIF";
+    if (IsEqualGUID(guid, GUID_ContainerFormatAdng)) return L"DNG";
+    if (IsEqualGUID(guid, GUID_ContainerFormatRaw) || (!ext.empty() && ImageEngine::IsRawExtension(ext))) {
+        if (!ext.empty()) {
+            std::wstring cleanExt = ext;
+            if (!cleanExt.empty() && cleanExt[0] == L'.') cleanExt = cleanExt.substr(1);
+            std::transform(cleanExt.begin(), cleanExt.end(), cleanExt.begin(), ::towupper);
+            return L"RAW (" + cleanExt + L")";
+        }
+        return L"RAW";
+    }
     return L"Image";
+}
+
+static double ReadExifRational(const PROPVARIANT& pv) {
+    if (pv.vt == VT_R8) return pv.dblVal;
+    if (pv.vt == VT_R4) return static_cast<double>(pv.fltVal);
+    if (pv.vt == VT_UI8) {
+        ULONG num = pv.uhVal.LowPart;
+        ULONG den = pv.uhVal.HighPart;
+        return (den != 0) ? (static_cast<double>(num) / static_cast<double>(den)) : 0.0;
+    }
+    if (pv.vt == VT_I8) {
+        LONG num = pv.hVal.LowPart;
+        LONG den = pv.hVal.HighPart;
+        return (den != 0) ? (static_cast<double>(num) / static_cast<double>(den)) : 0.0;
+    }
+    return 0.0;
 }
 
 WICBitmapTransformOptions ImageEngine::GetExifTransform(IWICMetadataQueryReader* reader) {
@@ -57,10 +112,13 @@ WICBitmapTransformOptions ImageEngine::GetExifTransform(IWICMetadataQueryReader*
     PropVariantInit(&value);
 
     // Try standard query paths for orientation
-    // /app1/ifd/{ushort=274} or /ifd/{ushort=274}
+    // /app1/ifd/{ushort=274}, /ifd/{ushort=274}, or /ifd/exif/{ushort=274}
     HRESULT hr = reader->GetMetadataByName(L"/app1/ifd/{ushort=274}", &value);
     if (FAILED(hr)) {
         hr = reader->GetMetadataByName(L"/ifd/{ushort=274}", &value);
+    }
+    if (FAILED(hr)) {
+        hr = reader->GetMetadataByName(L"/ifd/exif/{ushort=274}", &value);
     }
 
     unsigned short orientation = 1;
@@ -84,56 +142,157 @@ WICBitmapTransformOptions ImageEngine::GetExifTransform(IWICMetadataQueryReader*
 void ImageEngine::ParseExifMetadata(IWICMetadataQueryReader* reader, ImageMetadata& meta) {
     if (!reader) return;
 
-    PROPVARIANT val;
-
-    // Camera Model
-    PropVariantInit(&val);
-    if (SUCCEEDED(reader->GetMetadataByName(L"/app1/ifd/{ushort=272}", &val)) && (val.vt == VT_LPSTR || val.vt == VT_LPWSTR)) {
-        if (val.vt == VT_LPWSTR && val.pwszVal) meta.cameraModel = val.pwszVal;
-        else if (val.vt == VT_LPSTR && val.pszVal) {
-            int len = MultiByteToWideChar(CP_ACP, 0, val.pszVal, -1, nullptr, 0);
-            if (len > 0) {
-                meta.cameraModel.resize(len - 1);
-                MultiByteToWideChar(CP_ACP, 0, val.pszVal, -1, &meta.cameraModel[0], len);
+    auto QueryStr = [&](const wchar_t* p1, const wchar_t* p2, std::wstring& out) {
+        PROPVARIANT val;
+        PropVariantInit(&val);
+        HRESULT hr = reader->GetMetadataByName(p1, &val);
+        if (FAILED(hr) && p2) {
+            hr = reader->GetMetadataByName(p2, &val);
+        }
+        if (SUCCEEDED(hr)) {
+            if (val.vt == VT_LPWSTR && val.pwszVal) {
+                out = val.pwszVal;
+            } else if (val.vt == VT_LPSTR && val.pszVal) {
+                int len = MultiByteToWideChar(CP_ACP, 0, val.pszVal, -1, nullptr, 0);
+                if (len > 1) {
+                    out.resize(len);
+                    MultiByteToWideChar(CP_ACP, 0, val.pszVal, -1, out.data(), len);
+                    out.pop_back(); // Remove null terminator from std::wstring
+                }
             }
         }
+        PropVariantClear(&val);
+    };
+
+    auto Trim = [](std::wstring& s) {
+        while (!s.empty() && (s.back() == L' ' || s.back() == L'\t' || s.back() == L'\r' || s.back() == L'\n' || s.back() == L'\0')) {
+            s.pop_back();
+        }
+        size_t start = 0;
+        while (start < s.size() && (s[start] == L' ' || s[start] == L'\t' || s[start] == L'\r' || s[start] == L'\n')) {
+            start++;
+        }
+        if (start > 0) s = s.substr(start);
+    };
+
+    // Camera Make and Model
+    std::wstring make, model;
+    QueryStr(L"/app1/ifd/{ushort=271}", L"/ifd/{ushort=271}", make);
+    QueryStr(L"/app1/ifd/{ushort=272}", L"/ifd/{ushort=272}", model);
+    Trim(make);
+    Trim(model);
+
+    if (!model.empty()) {
+        if (!make.empty()) {
+            std::wstring lowerMake = make, lowerModel = model;
+            std::transform(lowerMake.begin(), lowerMake.end(), lowerMake.begin(), ::towlower);
+            std::transform(lowerModel.begin(), lowerModel.end(), lowerModel.begin(), ::towlower);
+            if (lowerModel.rfind(lowerMake, 0) == 0) {
+                meta.cameraModel = model;
+            } else {
+                meta.cameraModel = make + L" " + model;
+            }
+        } else {
+            meta.cameraModel = model;
+        }
+    } else if (!make.empty()) {
+        meta.cameraModel = make;
     }
-    PropVariantClear(&val);
 
     // Date Taken
-    PropVariantInit(&val);
-    if (SUCCEEDED(reader->GetMetadataByName(L"/app1/ifd/{ushort=306}", &val)) && (val.vt == VT_LPSTR || val.vt == VT_LPWSTR)) {
-        if (val.vt == VT_LPWSTR && val.pwszVal) meta.dateTaken = val.pwszVal;
-        else if (val.vt == VT_LPSTR && val.pszVal) {
-            int len = MultiByteToWideChar(CP_ACP, 0, val.pszVal, -1, nullptr, 0);
-            if (len > 0) {
-                meta.dateTaken.resize(len - 1);
-                MultiByteToWideChar(CP_ACP, 0, val.pszVal, -1, &meta.dateTaken[0], len);
-            }
-        }
-    }
-    PropVariantClear(&val);
+    QueryStr(L"/app1/ifd/{ushort=306}", L"/ifd/{ushort=306}", meta.dateTaken);
+    Trim(meta.dateTaken);
 
     // ISO Speed
-    PropVariantInit(&val);
-    if (SUCCEEDED(reader->GetMetadataByName(L"/app1/ifd/exif/{ushort=34855}", &val)) && val.vt == VT_UI2) {
-        meta.iso = L"ISO " + std::to_wstring(val.uiVal);
-    }
-    PropVariantClear(&val);
+    auto QueryUInt = [&](const wchar_t* p1, const wchar_t* p2, UINT& outVal) -> bool {
+        PROPVARIANT val;
+        PropVariantInit(&val);
+        HRESULT hr = reader->GetMetadataByName(p1, &val);
+        if (FAILED(hr) && p2) {
+            hr = reader->GetMetadataByName(p2, &val);
+        }
+        bool found = false;
+        if (SUCCEEDED(hr)) {
+            if (val.vt == VT_UI2) { outVal = val.uiVal; found = true; }
+            else if (val.vt == VT_UI4) { outVal = val.ulVal; found = true; }
+        }
+        PropVariantClear(&val);
+        return found;
+    };
 
-    // Exposure Time
-    PropVariantInit(&val);
-    if (SUCCEEDED(reader->GetMetadataByName(L"/app1/ifd/exif/{ushort=33434}", &val))) {
-        if (val.vt == VT_R8 && val.dblVal > 0.0) {
-            if (val.dblVal < 1.0) {
-                int denom = static_cast<int>(1.0 / val.dblVal + 0.5);
-                meta.exposure = L"1/" + std::to_wstring(denom) + L"s";
+    UINT isoVal = 0;
+    if (QueryUInt(L"/app1/ifd/exif/{ushort=34855}", L"/ifd/exif/{ushort=34855}", isoVal) && isoVal > 0) {
+        meta.iso = L"ISO " + std::to_wstring(isoVal);
+    }
+
+    // Exposure Time, Aperture, and Focal Length
+    auto QueryRational = [&](const wchar_t* p1, const wchar_t* p2) -> double {
+        PROPVARIANT val;
+        PropVariantInit(&val);
+        HRESULT hr = reader->GetMetadataByName(p1, &val);
+        if (FAILED(hr) && p2) {
+            hr = reader->GetMetadataByName(p2, &val);
+        }
+        double res = 0.0;
+        if (SUCCEEDED(hr)) {
+            res = ReadExifRational(val);
+        }
+        PropVariantClear(&val);
+        return res;
+    };
+
+    double expTime = QueryRational(L"/app1/ifd/exif/{ushort=33434}", L"/ifd/exif/{ushort=33434}");
+    double fNum    = QueryRational(L"/app1/ifd/exif/{ushort=33437}", L"/ifd/exif/{ushort=33437}");
+    double focal   = QueryRational(L"/app1/ifd/exif/{ushort=37386}", L"/ifd/exif/{ushort=37386}");
+
+    std::wstring shutterStr;
+    if (expTime > 0.0) {
+        if (expTime < 1.0) {
+            int denom = static_cast<int>(1.0 / expTime + 0.5);
+            shutterStr = L"1/" + std::to_wstring(denom) + L"s";
+        } else {
+            wchar_t buf[16];
+            if (expTime == static_cast<int>(expTime)) {
+                swprintf_s(buf, L"%ds", static_cast<int>(expTime));
             } else {
-                meta.exposure = std::to_wstring(static_cast<int>(val.dblVal)) + L"s";
+                swprintf_s(buf, L"%.1fs", expTime);
             }
+            shutterStr = buf;
         }
     }
-    PropVariantClear(&val);
+
+    std::wstring fStr;
+    if (fNum > 0.0) {
+        wchar_t buf[16];
+        swprintf_s(buf, L"f/%.1f", fNum);
+        fStr = buf;
+    }
+
+    std::wstring focalStr;
+    if (focal > 0.0) {
+        wchar_t buf[16];
+        if (focal == static_cast<int>(focal)) {
+            swprintf_s(buf, L"%dmm", static_cast<int>(focal));
+        } else {
+            swprintf_s(buf, L"%.1fmm", focal);
+        }
+        focalStr = buf;
+    }
+
+    std::wstring exposureCombined;
+    if (!shutterStr.empty()) exposureCombined += shutterStr;
+    if (!fStr.empty()) {
+        if (!exposureCombined.empty()) exposureCombined += L", ";
+        exposureCombined += fStr;
+    }
+    if (!focalStr.empty()) {
+        if (!exposureCombined.empty()) exposureCombined += L", ";
+        exposureCombined += focalStr;
+    }
+
+    if (!exposureCombined.empty()) {
+        meta.exposure = exposureCombined;
+    }
 }
 
 bool ImageEngine::LoadSvgMetadata(const std::wstring& filePath, ImageMetadata& meta) {
@@ -192,6 +351,143 @@ bool ImageEngine::LoadSvgMetadata(const std::wstring& filePath, ImageMetadata& m
     return true;
 }
 
+bool ImageEngine::LoadRawEmbeddedPreview(IWICImagingFactory* factory, const std::wstring& filePath, ImageDocument& doc) {
+    if (!factory) return false;
+
+    FILE* f = nullptr;
+    if (_wfopen_s(&f, filePath.c_str(), L"rb") != 0 || !f) {
+        return false;
+    }
+
+    _fseeki64(f, 0, SEEK_END);
+    int64_t fileSize = _ftelli64(f);
+    if (fileSize < 4096) {
+        fclose(f);
+        return false;
+    }
+    _fseeki64(f, 0, SEEK_SET);
+
+    size_t sz = static_cast<size_t>(fileSize);
+    std::vector<uint8_t> buf(sz);
+    size_t bytesRead = fread(buf.data(), 1, sz, f);
+    fclose(f);
+    if (bytesRead < 4096) return false;
+
+    UINT bestW = 0, bestH = 0;
+    size_t bestOffset = 0;
+
+    // Scan for embedded JPEG streams (FF D8 FF ...)
+    for (size_t i = 0; i + 16 < bytesRead; ++i) {
+        if (buf[i] == 0xFF && buf[i + 1] == 0xD8 && buf[i + 2] == 0xFF) {
+            uint8_t m = buf[i + 3];
+            if (m == 0xDB || m == 0xE0 || m == 0xE1 || m == 0xE2 || m == 0xC0 || m == 0xC2 || m == 0xC4 || m == 0xEE) {
+                ComPtr<IStream> stm;
+                stm.Attach(SHCreateMemStream(buf.data() + i, static_cast<UINT>(bytesRead - i)));
+                if (stm) {
+                    ComPtr<IWICBitmapDecoder> dec;
+                    if (SUCCEEDED(CoCreateInstance(CLSID_WICJpegDecoder, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dec)))) {
+                        if (SUCCEEDED(dec->Initialize(stm.Get(), WICDecodeMetadataCacheOnDemand))) {
+                            ComPtr<IWICBitmapFrameDecode> f0;
+                            if (SUCCEEDED(dec->GetFrame(0, &f0))) {
+                                UINT w = 0, h = 0;
+                                if (SUCCEEDED(f0->GetSize(&w, &h)) && w >= 160 && h >= 120) {
+                                    if (static_cast<uint64_t>(w) * h > static_cast<uint64_t>(bestW) * bestH) {
+                                        bestW = w;
+                                        bestH = h;
+                                        bestOffset = i;
+                                    }
+                                    i += 4096;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (bestW == 0 || bestH == 0) {
+        return false;
+    }
+
+    // Decode the best embedded JPEG stream
+    ComPtr<IStream> bestStream;
+    bestStream.Attach(SHCreateMemStream(buf.data() + bestOffset, static_cast<UINT>(bytesRead - bestOffset)));
+    if (!bestStream) return false;
+
+    ComPtr<IWICBitmapDecoder> bestDec;
+    if (FAILED(CoCreateInstance(CLSID_WICJpegDecoder, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&bestDec)))) {
+        return false;
+    }
+    if (FAILED(bestDec->Initialize(bestStream.Get(), WICDecodeMetadataCacheOnLoad))) {
+        return false;
+    }
+
+    ComPtr<IWICBitmapFrameDecode> f0;
+    if (FAILED(bestDec->GetFrame(0, &f0))) {
+        return false;
+    }
+
+    ComPtr<IWICMetadataQueryReader> metaReader;
+    f0->GetMetadataQueryReader(&metaReader);
+    if (metaReader) {
+        ParseExifMetadata(metaReader.Get(), doc.metadata);
+    }
+
+    WICBitmapTransformOptions transform = GetExifTransform(metaReader.Get());
+    ComPtr<IWICBitmapSource> sourceBitmap;
+
+    if (transform != WICBitmapTransformRotate0) {
+        ComPtr<IWICBitmapFlipRotator> rotator;
+        if (SUCCEEDED(factory->CreateBitmapFlipRotator(&rotator))) {
+            if (SUCCEEDED(rotator->Initialize(f0.Get(), transform))) {
+                sourceBitmap = rotator;
+            }
+        }
+    }
+    if (!sourceBitmap) {
+        sourceBitmap = f0;
+    }
+
+    ComPtr<IWICFormatConverter> converter;
+    if (FAILED(factory->CreateFormatConverter(&converter))) return false;
+    if (FAILED(converter->Initialize(
+        sourceBitmap.Get(),
+        GUID_WICPixelFormat32bppPBGRA,
+        WICBitmapDitherTypeNone,
+        nullptr,
+        0.0,
+        WICBitmapPaletteTypeCustom))) {
+        return false;
+    }
+
+    ComPtr<IWICBitmap> inMemoryBmp;
+    if (FAILED(factory->CreateBitmapFromSource(converter.Get(), WICBitmapCacheOnLoad, &inMemoryBmp)) || !inMemoryBmp) {
+        return false;
+    }
+
+    UINT outW = 0, outH = 0;
+    inMemoryBmp->GetSize(&outW, &outH);
+    doc.metadata.width = outW;
+    doc.metadata.height = outH;
+
+    std::filesystem::path p(filePath);
+    std::wstring ext = p.extension().wstring();
+    doc.metadata.formatName = FormatFromContainer(GUID_ContainerFormatRaw, ext);
+    doc.metadata.frameCount = 1;
+    doc.metadata.isAnimated = false;
+
+    FrameData fd;
+    fd.width = outW;
+    fd.height = outH;
+    fd.delayMs = 100;
+    fd.bitmap = inMemoryBmp;
+    doc.frames.clear();
+    doc.frames.push_back(std::move(fd));
+    doc.isValid = true;
+    return true;
+}
+
 std::shared_ptr<ImageDocument> ImageEngine::LoadFromFile(const std::wstring& filePath) {
     IWICImagingFactory* factory = GetThreadWicFactory();
     if (!factory) return nullptr;
@@ -199,6 +495,7 @@ std::shared_ptr<ImageDocument> ImageEngine::LoadFromFile(const std::wstring& fil
     auto doc = std::make_shared<ImageDocument>();
     doc->metadata.filePath = filePath;
 
+    std::wstring ext;
     try {
         std::filesystem::path p(filePath);
         doc->metadata.fileName = p.filename().wstring();
@@ -206,7 +503,7 @@ std::shared_ptr<ImageDocument> ImageEngine::LoadFromFile(const std::wstring& fil
             doc->metadata.fileSizeBytes = std::filesystem::file_size(p);
         }
 
-        std::wstring ext = p.extension().wstring();
+        ext = p.extension().wstring();
         std::transform(ext.begin(), ext.end(), ext.begin(), ::towlower);
         if (ext == L".svg") {
             if (LoadSvgMetadata(filePath, doc->metadata)) {
@@ -219,6 +516,8 @@ std::shared_ptr<ImageDocument> ImageEngine::LoadFromFile(const std::wstring& fil
         doc->metadata.fileName = filePath;
     }
 
+    bool isRawExt = IsRawExtension(ext);
+
     ComPtr<IWICBitmapDecoder> decoder;
     HRESULT hr = factory->CreateDecoderFromFilename(
         filePath.c_str(),
@@ -229,16 +528,47 @@ std::shared_ptr<ImageDocument> ImageEngine::LoadFromFile(const std::wstring& fil
     );
 
     if (FAILED(hr) || !decoder) {
+        if (isRawExt) {
+            if (LoadRawEmbeddedPreview(factory, filePath, *doc)) {
+                return doc;
+            }
+        }
         return nullptr;
     }
 
     GUID containerGuid = GUID_NULL;
     decoder->GetContainerFormat(&containerGuid);
-    doc->metadata.formatName = FormatFromContainer(containerGuid);
 
-    UINT frameCount = 0;
-    if (FAILED(decoder->GetFrameCount(&frameCount)) || frameCount == 0) {
-        return nullptr;
+    // If DNG decoder only returned a low-res thumbnail, try explicit CLSID_WICRAWDecoder
+    if (IsEqualGUID(containerGuid, GUID_ContainerFormatAdng)) {
+        ComPtr<IWICBitmapFrameDecode> testF0;
+        UINT tw = 0, th = 0;
+        if (SUCCEEDED(decoder->GetFrame(0, &testF0)) && SUCCEEDED(testF0->GetSize(&tw, &th))) {
+            if (std::max(tw, th) < 1024) {
+                ComPtr<IWICBitmapDecoder> rawDec;
+                if (SUCCEEDED(CoCreateInstance(CLSID_WICRAWDecoder, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&rawDec)))) {
+                    ComPtr<IWICStream> stream;
+                    if (SUCCEEDED(factory->CreateStream(&stream)) &&
+                        SUCCEEDED(stream->InitializeFromFilename(filePath.c_str(), GENERIC_READ))) {
+                        if (SUCCEEDED(rawDec->Initialize(stream.Get(), WICDecodeMetadataCacheOnLoad))) {
+                            decoder = rawDec;
+                            decoder->GetContainerFormat(&containerGuid);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    doc->metadata.formatName = FormatFromContainer(containerGuid, ext);
+
+    bool isRaw = IsEqualGUID(containerGuid, GUID_ContainerFormatRaw) || IsEqualGUID(containerGuid, GUID_ContainerFormatAdng) || isRawExt;
+
+    UINT frameCount = 1;
+    if (!isRaw) {
+        if (FAILED(decoder->GetFrameCount(&frameCount)) || frameCount == 0) {
+            return nullptr;
+        }
     }
 
     doc->metadata.frameCount = frameCount;
@@ -406,6 +736,82 @@ std::shared_ptr<ImageDocument> ImageEngine::LoadFromFile(const std::wstring& fil
                         }
                     }
                 }
+            }
+        }
+    } else if (isRaw) {
+        ComPtr<IWICBitmapFrameDecode> frame0;
+        decoder->GetFrame(0, &frame0);
+
+        ComPtr<IWICMetadataQueryReader> metaReader;
+        if (frame0) {
+            frame0->GetMetadataQueryReader(&metaReader);
+            if (metaReader) {
+                ParseExifMetadata(metaReader.Get(), doc->metadata);
+            }
+        }
+
+        WICBitmapTransformOptions transform = GetExifTransform(metaReader.Get());
+        ComPtr<IWICBitmapSource> sourceBitmap;
+
+        // Check if decoder provides a high-resolution preview
+        ComPtr<IWICBitmapSource> previewSource;
+        if (SUCCEEDED(decoder->GetPreview(&previewSource)) && previewSource) {
+            UINT pw = 0, ph = 0;
+            if (SUCCEEDED(previewSource->GetSize(&pw, &ph)) && std::max(pw, ph) >= 1280) {
+                sourceBitmap = previewSource;
+            }
+        }
+
+        if (!sourceBitmap && frame0) {
+            sourceBitmap = frame0;
+        }
+
+        bool isPreview = (previewSource && sourceBitmap.Get() == previewSource.Get());
+        bool decoded = false;
+        if (sourceBitmap) {
+            ComPtr<IWICFormatConverter> converter;
+            if (SUCCEEDED(factory->CreateFormatConverter(&converter))) {
+                if (SUCCEEDED(converter->Initialize(
+                    sourceBitmap.Get(),
+                    GUID_WICPixelFormat32bppPBGRA,
+                    WICBitmapDitherTypeNone,
+                    nullptr,
+                    0.0,
+                    WICBitmapPaletteTypeCustom))) {
+
+                    ComPtr<IWICBitmapSource> finalSource = converter;
+                    ComPtr<IWICBitmapFlipRotator> rotator;
+                    if (transform != WICBitmapTransformRotate0 && !isPreview) {
+                        if (SUCCEEDED(factory->CreateBitmapFlipRotator(&rotator))) {
+                            if (SUCCEEDED(rotator->Initialize(converter.Get(), transform))) {
+                                finalSource = rotator;
+                            }
+                        }
+                    }
+
+                    ComPtr<IWICBitmap> inMemoryBmp;
+                    if (SUCCEEDED(factory->CreateBitmapFromSource(finalSource.Get(), WICBitmapCacheOnLoad, &inMemoryBmp)) && inMemoryBmp) {
+                        UINT outW = 0, outH = 0;
+                        inMemoryBmp->GetSize(&outW, &outH);
+
+                        doc->metadata.width = outW;
+                        doc->metadata.height = outH;
+
+                        FrameData fd;
+                        fd.width = outW;
+                        fd.height = outH;
+                        fd.delayMs = 100;
+                        fd.bitmap = inMemoryBmp;
+                        doc->frames.push_back(std::move(fd));
+                        decoded = true;
+                    }
+                }
+            }
+        }
+
+        if (!decoded) {
+            if (LoadRawEmbeddedPreview(factory, filePath, *doc)) {
+                return doc;
             }
         }
     } else {
