@@ -8,7 +8,7 @@
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-0078D6.svg)](https://www.microsoft.com/windows)
 [![Release](https://img.shields.io/github/v/release/ashahin1/LightPhotoViewer?color=blue)](https://github.com/ashahin1/LightPhotoViewer/releases)
 [![Binary Size](https://img.shields.io/badge/Binary%20Size-458.5%20KB-brightgreen.svg)]()
-[![Private RAM](https://img.shields.io/badge/Private%20RAM-35--50%20MB-success.svg)]()
+[![Private RAM](https://img.shields.io/badge/Private%20RAM-35--55%20MB-success.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 An ultra-fast, minimalist, hardware-accelerated image viewer for Windows 10 & 11.
@@ -27,7 +27,7 @@ Measured on Windows 11 (64-bit) with cold execution and hardware performance cou
 | **Standalone Binary Size** | **458.5 KB** | ~150 MB | ~65 MB | ~3 MB |
 | **External Runtime DLLs** | **0** (Native OS only) | 40+ | 30+ | 0–10 |
 | **Cold Startup Latency** | **~220 ms** | ~1,800 ms | ~900 ms | ~120 ms |
-| **Private RAM (4K Image)** | **~35–50 MB** | ~180 MB | ~110 MB | ~40 MB |
+| **Private RAM (4K Image)** | **~35–55 MB** | ~180 MB | ~110 MB | ~40 MB |
 | **Admin Required** | **No** | Store managed | Optional | Optional |
 
 ---
@@ -37,7 +37,7 @@ Measured on Windows 11 (64-bit) with cold execution and hardware performance cou
 * **Instant Cold Launch**: Opens in ~220 ms with zero XAML, WinUI, or Electron runtime bloat.
 * **Microscopic Footprint**: Single standalone **458.5 KB** executable with zero external DLL dependencies (`/MT`).
 * **Comprehensive Camera RAW Support (26+ Formats)**:
-  * Native, blazing-fast viewing for professional camera RAW photos: Canon (`.cr2`, `.cr3`, `.crw`), Nikon (`.nef`, `.nrw`), Sony (`.arw`, `.srf`, `.sr2`), Adobe (`.dng`), Fujifilm (`.raf`), Olympus (`.orf`, `.ori`), Panasonic (`.rw2`), Pentax (`.pef`, `.ptx`), Hasselblad (`.3fr`, `.fff`), Leica (`.rwl`), Sigma (`.x3f`), Samsung (`.srw`), Kodak (`.kdc`, `.dcr`), Minolta (`.mrw`), Leaf (`.mos`), Mamiya (`.mef`), and Epson (`.erf`).
+  * Native, blazing-fast viewing for professional camera RAW photos from Canon, Nikon, Sony, Adobe DNG, Fujifilm, Olympus, Panasonic, Pentax, Hasselblad, Leica, Sigma, Samsung, Kodak, Minolta, Leaf, Mamiya, and Epson. See the full list in [Supported Formats](#-supported-formats).
   * **2-Tier Intelligent Decoding Pipeline**:
     * **Tier 1 (Instant WIC Preview)**: Leverages camera-embedded full-resolution preview streams (`14–100 ms`, up to 24 MP) with orientation transformations, completely eliminating 1–2 second Bayer demosaicing lags during folder browsing. Automatically switches to full sensor demosaicing via `CLSID_WICRAWDecoder` on Adobe `.dng` files with sub-1024px thumbnails.
     * **Tier 2 (Zero-Dependency Embedded Recovery)**: Built-in binary stream extractor scanning for baseline/progressive JPEG frames decoded via `CLSID_WICJpegDecoder`, guaranteeing instant RAW viewing compatibility even on Windows editions lacking Store RAW codec packages.
@@ -87,7 +87,62 @@ Measured on Windows 11 (64-bit) with cold execution and hardware performance cou
 * **EXIF & Camera Metadata Inspection**:
   * Press **`I`** to toggle full EXIF card: Camera Make & Model (with automatic brand deduplication), Date Taken, Shutter Speed (`1/Xs`), Aperture (`f/X.X`), Focal Length (`Xmm`), ISO speed, Dimensions, and File Size.
 * **Zero-Admin Shell Associations**:
-  * Run `LightPhotoViewer.exe /register` to associate supported image formats (including common RAW formats `.dng`, `.cr2`, `.cr3`, `.nef`, `.arw`, `.raf`, `.orf`, `.rw2`, `.pef`, `.raw`) in your user profile without admin rights.
+  * Run `LightPhotoViewer.exe /register` to add LightPhotoViewer to the "Open with" list of the common formats (see [Shell Association](#shell-association-register)) in your user profile without admin rights.
+
+---
+
+## 🖼️ Supported Formats
+
+LightPhotoViewer decodes images through the Windows Imaging Component (WIC) and Direct2D, so no codec is bundled in the executable. Files with any of the extensions below are recognized by folder navigation, drag-and-drop, the command line, and the **Open** dialog (`Ctrl+O`).
+
+### Standard Images
+| Format | Extensions | Notes |
+| :--- | :--- | :--- |
+| JPEG | `.jpg`, `.jpeg`, `.jpe` | EXIF metadata and orientation supported |
+| PNG | `.png` | Transparency supported |
+| GIF | `.gif` | Animated GIF89a with full frame compositor |
+| WebP | `.webp` | Requires WebP codec (built into current Windows 10/11) |
+| BMP | `.bmp`, `.dib` | |
+| Icon | `.ico` | |
+| TIFF | `.tiff`, `.tif` | |
+| SVG | `.svg` | Rendered natively as vector via Direct2D (up to 5,000% zoom) |
+| AVIF | `.avif` | Requires the free *AV1 Video Extension* from the Microsoft Store |
+| HEIC / HEIF | `.heic`, `.heif` | Requires the *HEIF Image Extensions* (and HEVC codec for HEIC) from the Microsoft Store |
+
+### Camera RAW Images
+| Manufacturer | Extensions |
+| :--- | :--- |
+| Canon | `.cr2`, `.cr3`, `.crw` |
+| Nikon | `.nef`, `.nrw` |
+| Sony | `.arw`, `.srf`, `.sr2` |
+| Adobe (universal) | `.dng` |
+| Fujifilm | `.raf` |
+| Olympus / OM System | `.orf`, `.ori` |
+| Panasonic | `.rw2` |
+| Pentax / Ricoh | `.pef`, `.ptx` |
+| Hasselblad | `.3fr`, `.fff` |
+| Leica | `.rwl`, `.raw` |
+| Sigma | `.x3f` |
+| Samsung | `.srw` |
+| Kodak | `.kdc`, `.dcr` |
+| Minolta | `.mrw` |
+| Leaf | `.mos` |
+| Mamiya | `.mef` |
+| Epson | `.erf` |
+
+> [!NOTE]
+> RAW files are displayed using the full-resolution preview embedded by the camera, so they open almost instantly. This is a viewer, not a RAW developer: no sensor-level editing is performed. If a RAW file cannot be decoded by an installed Windows codec, LightPhotoViewer falls back to extracting the embedded JPEG preview. Availability of the full sensor decode for newer camera models depends on the Windows *Raw Image Extension*.
+
+### Shell Association (`/register`)
+`/register` adds LightPhotoViewer to the "Open with" list for: `.jpg`, `.jpeg`, `.png`, `.webp`, `.gif`, `.bmp`, `.ico`, `.tiff`, `.tif`, `.avif`, `.svg`, `.dng`, `.cr2`, `.cr3`, `.nef`, `.arw`, `.raf`, `.orf`, `.rw2`, `.pef`, `.raw`. Other supported extensions can still be opened via **Open** (`Ctrl+O`), drag-and-drop, or the command line.
+
+---
+
+## 📦 Installation
+
+LightPhotoViewer is portable: download `LightPhotoViewer.exe` (or the `.zip` with README and LICENSE) from the [latest release](https://github.com/ashahin1/LightPhotoViewer/releases/latest), place it anywhere, and run it. No installer, runtime, or admin rights are needed. Optionally run `LightPhotoViewer.exe /register` to add it to "Open with". SHA-256 checksums are published with every release.
+
+**Requirements**: Windows 10 (Build 1809+) or Windows 11, 64-bit.
 
 ---
 
