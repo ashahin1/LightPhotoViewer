@@ -1016,7 +1016,7 @@ void D2DRenderer::RenderHelpOverlay(POINT mousePt) {
                 { L"Ctrl + P",       L"Print image..." },
                 { L"Ctrl + W",       L"Close active tab" },
                 { L"Ctrl+Shift+T",   L"Reopen closed tab" },
-                { L"Ctrl + Tab",     L"Next tab" },
+                { L"Ctrl + Tab",     L"Cycle tabs (Shift: prev)" },
             }
         }
     };
@@ -1032,6 +1032,7 @@ void D2DRenderer::RenderHelpOverlay(POINT mousePt) {
                 { L"Left Drag",   L"Pan canvas" },
                 { L"Double Click",L"Toggle Fit / 100%" },
                 { L"Middle Click",L"Reset to Fit" },
+                { L"Right Click", L"Context menu" },
                 { L"B",           L"Toggle Backdrop" },
                 { L"F / Enter",   L"Toggle fullscreen" },
             }
@@ -1046,6 +1047,7 @@ void D2DRenderer::RenderHelpOverlay(POINT mousePt) {
                 { L"L",           L"Rotate 90° CCW" },
                 { L"H / V",       L"Flip Horiz / Vert" },
                 { L"I",           L"Toggle EXIF info" },
+                { L"[ / ]",       L"Step animation frame" },
                 { L"Ctrl + C",    L"Copy bitmap" },
                 { L"Ctrl+Shift+C",L"Copy file path" },
                 { L"F1",          L"Toggle this help" },
@@ -1100,7 +1102,7 @@ void D2DRenderer::RenderHelpOverlay(POINT mousePt) {
     m_brushBorder->SetColor(D2D1::ColorF(0x27272a, 1.0f));
     m_d2dContext->DrawLine(D2D1::Point2F(cardX + headerPad, footerY), D2D1::Point2F(cardX + cardW - headerPad, footerY), m_brushBorder.Get(), 1.0f);
 
-    const wchar_t footer[] = L"Press F1 or Esc or click outside to dismiss \x2022 Zero Runtime Dependencies";
+    const wchar_t footer[] = L"Press F1, Esc, or click outside to dismiss \x2022 Zero Runtime Dependencies";
     D2D1_RECT_F footRect = D2D1::RectF(cardX + headerPad, footerY + 6.0f * m_dpiScale, cardX + cardW - headerPad, footerY + 26.0f * m_dpiScale);
     m_brushTextMuted->SetColor(D2D1::ColorF(0x64748b));
     m_d2dContext->DrawText(footer, static_cast<UINT32>(wcslen(footer)), m_formatKeyDesc.Get(), footRect, m_brushTextMuted.Get());
