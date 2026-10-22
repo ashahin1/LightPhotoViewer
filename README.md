@@ -7,7 +7,7 @@
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://isocpp.org/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-0078D6.svg)](https://www.microsoft.com/windows)
 [![Release](https://img.shields.io/github/v/release/ashahin1/LightPhotoViewer?color=blue)](https://github.com/ashahin1/LightPhotoViewer/releases)
-[![Binary Size](https://img.shields.io/badge/Binary%20Size-458.5%20KB-brightgreen.svg)]()
+[![Binary Size](https://img.shields.io/badge/Binary%20Size-466%20KB-brightgreen.svg)]()
 [![Private RAM](https://img.shields.io/badge/Private%20RAM-35--55%20MB-success.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -24,7 +24,7 @@ Measured on Windows 11 (64-bit) with cold execution and hardware performance cou
 
 | Metric | LightPhotoViewer | Windows Photos | ImageGlass | IrfanView |
 | :--- | :---: | :---: | :---: | :---: |
-| **Standalone Binary Size** | **458.5 KB** | ~150 MB | ~65 MB | ~3 MB |
+| **Standalone Binary Size** | **466 KB** | ~150 MB | ~65 MB | ~3 MB |
 | **External Runtime DLLs** | **0** (Native OS only) | 40+ | 30+ | 0–10 |
 | **Cold Startup Latency** | **~220 ms** | ~1,800 ms | ~900 ms | ~120 ms |
 | **Private RAM (4K Image)** | **~35–55 MB** | ~180 MB | ~110 MB | ~40 MB |
@@ -35,7 +35,7 @@ Measured on Windows 11 (64-bit) with cold execution and hardware performance cou
 ## 🚀 Key Highlights
 
 * **Instant Cold Launch**: Opens in ~220 ms with zero XAML, WinUI, or Electron runtime bloat.
-* **Microscopic Footprint**: Single standalone **458.5 KB** executable with zero external DLL dependencies (`/MT`).
+* **Microscopic Footprint**: Single standalone **466 KB** executable with zero external DLL dependencies (`/MT`).
 * **Comprehensive Camera RAW Support (26+ Formats)**:
   * Native, blazing-fast viewing for professional camera RAW photos from Canon, Nikon, Sony, Adobe DNG, Fujifilm, Olympus, Panasonic, Pentax, Hasselblad, Leica, Sigma, Samsung, Kodak, Minolta, Leaf, Mamiya, and Epson. See the full list in [Supported Formats](#-supported-formats).
   * **2-Tier Intelligent Decoding Pipeline**:
@@ -134,7 +134,7 @@ LightPhotoViewer decodes images through the Windows Imaging Component (WIC) and 
 > RAW files are displayed using the full-resolution preview embedded by the camera, so they open almost instantly. This is a viewer, not a RAW developer: no sensor-level editing is performed. If a RAW file cannot be decoded by an installed Windows codec, LightPhotoViewer falls back to extracting the embedded JPEG preview. Availability of the full sensor decode for newer camera models depends on the Windows *Raw Image Extension*.
 
 ### Shell Association (`/register`)
-`/register` adds LightPhotoViewer to the "Open with" list for: `.jpg`, `.jpeg`, `.png`, `.webp`, `.gif`, `.bmp`, `.ico`, `.tiff`, `.tif`, `.avif`, `.svg`, `.dng`, `.cr2`, `.cr3`, `.nef`, `.arw`, `.raf`, `.orf`, `.rw2`, `.pef`, `.raw`. Other supported extensions can still be opened via **Open** (`Ctrl+O`), drag-and-drop, or the command line.
+`/register` (no admin rights, current user only) registers LightPhotoViewer for **every** extension in the tables above and adds it to Windows **Settings > Apps > Default apps** and the "Open with" list. Windows does not allow apps to silently take over defaults, so pick LightPhotoViewer there (or via "Open with" > "Choose another app") to make it the default. `/unregister` removes every key it created. Add `/silent` to suppress the confirmation dialog.
 
 ---
 

@@ -1,5 +1,6 @@
 #include "pch.hpp"
 #include "app_window.hpp"
+#include "supported_formats.hpp"
 #include "../resources/resource_ids.hpp"
 
 static const wchar_t* WND_CLASS_NAME = L"LightPhotoViewer_WndClass";
@@ -261,25 +262,64 @@ void AppWindow::ToggleFullscreen() {
 }
 
 void AppWindow::OpenFileDialog() {
-    wchar_t filePath[MAX_PATH] = L"";
+    // Build the filter string at runtime from the shared extension lists so it never drifts
+    // from what the app can actually open. Entries are "description\0pattern\0".
+    const std::wstring stdPattern = SupportedFormats::BuildPattern(SupportedFormats::kStandard);
+    const std::wstring rawPattern = SupportedFormats::BuildPattern(SupportedFormats::kRaw);
+
+    std::wstring filter;
+    auto addFilter = [&filter](const std::wstring& desc, const std::wstring& pattern) {
+        filter += desc;
+        filter.push_back(L'\0');
+        filter += pattern;
+        filter.push_back(L'\0');
+    };
+    addFilter(L"All Supported Images", stdPattern + L";" + rawPattern);
+    addFilter(L"Camera RAW Images", rawPattern);
+    addFilter(L"JPEG Images (*.jpg;*.jpeg;*.jpe)", L"*.jpg;*.jpeg;*.jpe");
+    addFilter(L"PNG Images (*.png)", L"*.png");
+    addFilter(L"WebP Images (*.webp)", L"*.webp");
+    addFilter(L"GIF Images (*.gif)", L"*.gif");
+    addFilter(L"BMP Images (*.bmp;*.dib)", L"*.bmp;*.dib");
+    addFilter(L"TIFF Images (*.tiff;*.tif)", L"*.tiff;*.tif");
+    addFilter(L"SVG Vector Images (*.svg)", L"*.svg");
+    addFilter(L"Icons (*.ico)", L"*.ico");
+    addFilter(L"AVIF / HEIC / HEIF Images", L"*.avif;*.heic;*.heif");
+    addFilter(L"All Files (*.*)", L"*.*");
+    filter.push_back(L'\0'); // double-null terminator
+
+    // Large buffer so multiple selections and long paths fit.
+    std::vector<wchar_t> buffer(32768, L'\0');
 
     OPENFILENAMEW ofn = {};
     ofn.lStructSize = sizeof(OPENFILENAMEW);
     ofn.hwndOwner = m_hWnd;
-    ofn.lpstrFilter =
-        L"All Supported Images (*.jpg;*.png;*.webp;*.gif;*.bmp;*.tiff;*.avif;*.svg;*.cr2;*.cr3;*.nef;*.arw;*.dng;...)\0*.jpg;*.jpeg;*.jpe;*.png;*.webp;*.gif;*.bmp;*.dib;*.tiff;*.tif;*.avif;*.svg;*.heic;*.cr2;*.cr3;*.crw;*.nef;*.nrw;*.arw;*.srf;*.sr2;*.dng;*.raf;*.orf;*.ori;*.rw2;*.pef;*.ptx;*.3fr;*.fff;*.rwl;*.x3f;*.srw;*.raw;*.kdc;*.dcr;*.mrw;*.mos;*.erf;*.mef\0"
-        L"Camera RAW Images (*.cr2;*.cr3;*.nef;*.arw;*.dng;*.raf;*.orf;*.rw2;*.pef;*.raw)\0*.cr2;*.cr3;*.crw;*.nef;*.nrw;*.arw;*.srf;*.sr2;*.dng;*.raf;*.orf;*.ori;*.rw2;*.pef;*.ptx;*.3fr;*.fff;*.rwl;*.x3f;*.srw;*.raw;*.kdc;*.dcr;*.mrw;*.mos;*.erf;*.mef\0"
-        L"JPEG Images (*.jpg;*.jpeg)\0*.jpg;*.jpeg;*.jpe\0"
-        L"PNG Images (*.png)\0*.png\0"
-        L"WebP Images (*.webp)\0*.webp\0"
-        L"GIF Images (*.gif)\0*.gif\0"
-        L"All Files (*.*)\0*.*\0";
-    ofn.lpstrFile = filePath;
-    ofn.nMaxFile = MAX_PATH;
-    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_ENABLESIZING;
+    ofn.lpstrFilter = filter.c_str();
+    ofn.nFilterIndex = 1;
+    ofn.lpstrFile = buffer.data();
+    ofn.nMaxFile = static_cast<DWORD>(buffer.size());
+    ofn.lpstrTitle = L"Open Image";
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_ENABLESIZING |
+                OFN_EXPLORER | OFN_ALLOWMULTISELECT | OFN_NOCHANGEDIR | OFN_HIDEREADONLY;
 
     if (GetOpenFileNameW(&ofn)) {
-        m_tabManager.OpenTab(filePath);
+        // Single selection: buffer holds the full path. Multi-selection: "dir\0file1\0file2\0\0".
+        std::vector<std::wstring> files;
+        const wchar_t* first = buffer.data();
+        const wchar_t* next = first + wcslen(first) + 1;
+        if (*next == L'\0') {
+            files.emplace_back(first);
+        } else {
+            std::wstring dir = first;
+            if (!dir.empty() && dir.back() != L'\\') dir += L'\\';
+            for (const wchar_t* p = next; *p; p += wcslen(p) + 1) {
+                files.push_back(dir + p);
+            }
+        }
+
+        for (const auto& file : files) {
+            m_tabManager.OpenTab(file);
+        }
         UpdateWindowTitle();
         Invalidate();
     }
@@ -1356,12 +1396,14 @@ void AppWindow::RegisterShellAssociations() {
     wchar_t exePath[MAX_PATH];
     GetModuleFileNameW(nullptr, exePath, MAX_PATH);
 
-    const wchar_t* extensions[] = {
-        L".jpg", L".jpeg", L".png", L".webp", L".gif",
-        L".bmp", L".ico", L".tiff", L".tif", L".avif", L".svg",
-        L".dng", L".cr2", L".cr3", L".nef", L".arw", L".raf",
-        L".orf", L".rw2", L".pef", L".raw"
+    auto setString = [](HKEY key, const wchar_t* name, const std::wstring& value) {
+        RegSetValueExW(key, name, 0, REG_SZ, reinterpret_cast<const BYTE*>(value.c_str()),
+                       static_cast<DWORD>((value.length() + 1) * sizeof(wchar_t)));
     };
+
+    std::vector<std::wstring> extensions;
+    for (const wchar_t* e : SupportedFormats::kStandard) extensions.emplace_back(e);
+    for (const wchar_t* e : SupportedFormats::kRaw) extensions.emplace_back(e);
 
     const wchar_t* progId = L"LightPhotoViewer.Image";
 
@@ -1392,7 +1434,7 @@ void AppWindow::RegisterShellAssociations() {
     }
 
     for (const auto& ext : extensions) {
-        std::wstring keyPath = L"Software\\Classes\\" + std::wstring(ext) + L"\\OpenWithProgids";
+        std::wstring keyPath = L"Software\\Classes\\" + ext + L"\\OpenWithProgids";
         HKEY hKeyExt;
         if (RegCreateKeyExW(HKEY_CURRENT_USER, keyPath.c_str(), 0, nullptr, REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &hKeyExt, nullptr) == ERROR_SUCCESS) {
             RegSetValueExW(hKeyExt, progId, 0, REG_NONE, nullptr, 0);
@@ -1400,21 +1442,73 @@ void AppWindow::RegisterShellAssociations() {
         }
     }
 
+    // Applications\LightPhotoViewer.exe: makes the app show up reliably in "Open with" lists
+    // and lets Explorer know which file types it handles.
+    const std::wstring exeName = std::filesystem::path(exePath).filename().wstring();
+    const std::wstring appKeyPath = L"Software\\Classes\\Applications\\" + exeName;
+    HKEY hKeyApp;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, appKeyPath.c_str(), 0, nullptr, REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &hKeyApp, nullptr) == ERROR_SUCCESS) {
+        setString(hKeyApp, L"FriendlyAppName", L"LightPhotoViewer");
+
+        HKEY hKeyCmd;
+        if (RegCreateKeyExW(hKeyApp, L"shell\\open\\command", 0, nullptr, REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &hKeyCmd, nullptr) == ERROR_SUCCESS) {
+            setString(hKeyCmd, nullptr, L"\"" + std::wstring(exePath) + L"\" \"%1\"");
+            RegCloseKey(hKeyCmd);
+        }
+
+        HKEY hKeyTypes;
+        if (RegCreateKeyExW(hKeyApp, L"SupportedTypes", 0, nullptr, REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &hKeyTypes, nullptr) == ERROR_SUCCESS) {
+            for (const auto& ext : extensions) {
+                setString(hKeyTypes, ext.c_str(), L"");
+            }
+            RegCloseKey(hKeyTypes);
+        }
+        RegCloseKey(hKeyApp);
+    }
+
+    // Capabilities + RegisteredApplications: lists LightPhotoViewer in
+    // Windows Settings > Apps > Default apps so users can choose it as the default viewer.
+    HKEY hKeyCaps;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\LightPhotoViewer\\Capabilities", 0, nullptr, REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &hKeyCaps, nullptr) == ERROR_SUCCESS) {
+        setString(hKeyCaps, L"ApplicationName", L"LightPhotoViewer");
+        setString(hKeyCaps, L"ApplicationDescription", L"Ultra-fast, minimalist image viewer");
+
+        HKEY hKeyAssoc;
+        if (RegCreateKeyExW(hKeyCaps, L"FileAssociations", 0, nullptr, REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &hKeyAssoc, nullptr) == ERROR_SUCCESS) {
+            for (const auto& ext : extensions) {
+                setString(hKeyAssoc, ext.c_str(), progId);
+            }
+            RegCloseKey(hKeyAssoc);
+        }
+        RegCloseKey(hKeyCaps);
+    }
+
+    HKEY hKeyRegApps;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\RegisteredApplications", 0, nullptr, REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &hKeyRegApps, nullptr) == ERROR_SUCCESS) {
+        setString(hKeyRegApps, L"LightPhotoViewer", L"Software\\LightPhotoViewer\\Capabilities");
+        RegCloseKey(hKeyRegApps);
+    }
+
     SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
 }
 
 void AppWindow::UnregisterShellAssociations() {
     RegDeleteTreeW(HKEY_CURRENT_USER, L"Software\\Classes\\LightPhotoViewer.Image");
+    RegDeleteTreeW(HKEY_CURRENT_USER, L"Software\\Classes\\Applications\\LightPhotoViewer.exe");
+    RegDeleteTreeW(HKEY_CURRENT_USER, L"Software\\LightPhotoViewer");
 
-    const wchar_t* extensions[] = {
-        L".jpg", L".jpeg", L".png", L".webp", L".gif",
-        L".bmp", L".ico", L".tiff", L".tif", L".avif", L".svg",
-        L".dng", L".cr2", L".cr3", L".nef", L".arw", L".raf",
-        L".orf", L".rw2", L".pef", L".raw"
-    };
+    HKEY hKeyRegApps;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\RegisteredApplications", 0, KEY_WRITE, &hKeyRegApps) == ERROR_SUCCESS) {
+        RegDeleteValueW(hKeyRegApps, L"LightPhotoViewer");
+        RegCloseKey(hKeyRegApps);
+    }
+
+    std::vector<std::wstring> extensions;
+    for (const wchar_t* e : SupportedFormats::kStandard) extensions.emplace_back(e);
+    for (const wchar_t* e : SupportedFormats::kRaw) extensions.emplace_back(e);
 
     for (const auto& ext : extensions) {
-        std::wstring keyPath = L"Software\\Classes\\" + std::wstring(ext) + L"\\OpenWithProgids";
+        std::wstring keyPath = L"Software\\Classes\\" + ext + L"\\OpenWithProgids";
         HKEY hKeyExt;
         if (RegOpenKeyExW(HKEY_CURRENT_USER, keyPath.c_str(), 0, KEY_WRITE, &hKeyExt) == ERROR_SUCCESS) {
             RegDeleteValueW(hKeyExt, L"LightPhotoViewer.Image");

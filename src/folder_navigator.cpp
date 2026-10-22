@@ -1,6 +1,7 @@
 #include "pch.hpp"
 #include "folder_navigator.hpp"
 #include "image_engine.hpp"
+#include "supported_formats.hpp"
 
 FolderNavigator::FolderNavigator() {
     m_stopWorker = false;
@@ -20,12 +21,8 @@ bool FolderNavigator::IsSupportedExtension(const std::wstring& ext) {
     std::wstring lower = ext;
     std::transform(lower.begin(), lower.end(), lower.begin(), ::towlower);
 
-    if (lower == L".jpg"  || lower == L".jpeg" || lower == L".jpe" ||
-        lower == L".png"  || lower == L".gif"  || lower == L".webp" ||
-        lower == L".bmp"  || lower == L".dib"  || lower == L".ico"  ||
-        lower == L".tiff" || lower == L".tif"  || lower == L".avif" ||
-        lower == L".svg"  || lower == L".heic" || lower == L".heif") {
-        return true;
+    for (const wchar_t* supported : SupportedFormats::kStandard) {
+        if (lower == supported) return true;
     }
     return ImageEngine::IsRawExtension(lower);
 }

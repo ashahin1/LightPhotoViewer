@@ -1,5 +1,6 @@
 #include "pch.hpp"
 #include "image_engine.hpp"
+#include "supported_formats.hpp"
 
 ImageEngine& ImageEngine::Instance() {
     static ImageEngine s_instance;
@@ -42,26 +43,13 @@ bool ImageEngine::IsRawExtension(const std::wstring& ext) {
     if (!lower.empty() && lower[0] == L'.') {
         lower = lower.substr(1);
     }
-    static const std::unordered_set<std::wstring> s_rawExts = {
-        L"cr2", L"cr3", L"crw",
-        L"nef", L"nrw",
-        L"arw", L"srf", L"sr2",
-        L"dng",
-        L"raf",
-        L"orf", L"ori",
-        L"rw2",
-        L"pef", L"ptx",
-        L"3fr", L"fff",
-        L"rwl",
-        L"x3f",
-        L"srw",
-        L"raw",
-        L"kdc", L"dcr",
-        L"mrw",
-        L"mos",
-        L"erf",
-        L"mef"
-    };
+    static const std::unordered_set<std::wstring> s_rawExts = [] {
+        std::unordered_set<std::wstring> set;
+        for (const wchar_t* e : SupportedFormats::kRaw) {
+            set.insert(e + 1); // strip leading '.'
+        }
+        return set;
+    }();
     return s_rawExts.find(lower) != s_rawExts.end();
 }
 

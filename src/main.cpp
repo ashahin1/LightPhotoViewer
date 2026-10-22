@@ -37,7 +37,7 @@ int WINAPI wWinMain(HINSTANCE /*hInstance*/, HINSTANCE /*hPrevInstance*/, PWSTR 
     if (registerFlag) {
         AppWindow::RegisterShellAssociations();
         if (!silent) {
-            MessageBoxW(nullptr, L"LightPhotoViewer successfully registered as an image viewer!", L"LightPhotoViewer", MB_OK | MB_ICONINFORMATION);
+            MessageBoxW(nullptr, L"LightPhotoViewer successfully registered!\n\nTo make it your default image viewer, choose it in Windows Settings > Apps > Default apps, or use \"Open with\" > \"Choose another app\" on any image.\n\nUse /unregister to remove the associations.", L"LightPhotoViewer", MB_OK | MB_ICONINFORMATION);
         }
         CoUninitialize();
         return 0;
