@@ -8,9 +8,10 @@ $pReg = Start-Process -FilePath $exe -ArgumentList "/register /silent" -Wait -Pa
 $regProp = Get-ItemProperty -Path "HKCU:\Software\Classes\.jpg\OpenWithProgids" -ErrorAction SilentlyContinue
 $nefProp = Get-ItemProperty -Path "HKCU:\Software\Classes\.nef\OpenWithProgids" -ErrorAction SilentlyContinue
 $heicProp = Get-ItemProperty -Path "HKCU:\Software\Classes\.heic\OpenWithProgids" -ErrorAction SilentlyContinue
+$jfifProp = Get-ItemProperty -Path "HKCU:\Software\Classes\.jfif\OpenWithProgids" -ErrorAction SilentlyContinue
 $appKey = Test-Path "HKCU:\Software\Classes\Applications\LightPhotoViewer.exe\shell\open\command"
 $regApp = Get-ItemProperty -Path "HKCU:\Software\RegisteredApplications" -ErrorAction SilentlyContinue
-$isReg = ($null -ne $regProp) -and ($null -ne $regProp."LightPhotoViewer.Image") -and ($null -ne $nefProp."LightPhotoViewer.Image") -and ($null -ne $heicProp."LightPhotoViewer.Image") -and $appKey -and ($null -ne $regApp.LightPhotoViewer)
+$isReg = ($null -ne $regProp) -and ($null -ne $regProp."LightPhotoViewer.Image") -and ($null -ne $nefProp."LightPhotoViewer.Image") -and ($null -ne $heicProp."LightPhotoViewer.Image") -and ($null -ne $jfifProp."LightPhotoViewer.Image") -and $appKey -and ($null -ne $regApp.LightPhotoViewer)
 
 $c1 = if ($isReg) { "Green" } else { "Red" }
 Write-Host "  Registered .jpg extension: $isReg" -ForegroundColor $c1

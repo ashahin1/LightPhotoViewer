@@ -276,15 +276,24 @@ void AppWindow::OpenFileDialog() {
     };
     addFilter(L"All Supported Images", stdPattern + L";" + rawPattern);
     addFilter(L"Camera RAW Images", rawPattern);
-    addFilter(L"JPEG Images (*.jpg;*.jpeg;*.jpe)", L"*.jpg;*.jpeg;*.jpe");
-    addFilter(L"PNG Images (*.png)", L"*.png");
-    addFilter(L"WebP Images (*.webp)", L"*.webp");
-    addFilter(L"GIF Images (*.gif)", L"*.gif");
-    addFilter(L"BMP Images (*.bmp;*.dib)", L"*.bmp;*.dib");
-    addFilter(L"TIFF Images (*.tiff;*.tif)", L"*.tiff;*.tif");
-    addFilter(L"SVG Vector Images (*.svg)", L"*.svg");
-    addFilter(L"Icons (*.ico)", L"*.ico");
-    addFilter(L"AVIF / HEIC / HEIF Images", L"*.avif;*.heic;*.heif");
+    addFilter(SupportedFormats::BuildFilterLabel(L"JPEG Images", SupportedFormats::kJpeg),
+              SupportedFormats::BuildPattern(SupportedFormats::kJpeg));
+    addFilter(SupportedFormats::BuildFilterLabel(L"PNG Images", SupportedFormats::kPng),
+              SupportedFormats::BuildPattern(SupportedFormats::kPng));
+    addFilter(SupportedFormats::BuildFilterLabel(L"WebP Images", SupportedFormats::kWebp),
+              SupportedFormats::BuildPattern(SupportedFormats::kWebp));
+    addFilter(SupportedFormats::BuildFilterLabel(L"GIF Images", SupportedFormats::kGif),
+              SupportedFormats::BuildPattern(SupportedFormats::kGif));
+    addFilter(SupportedFormats::BuildFilterLabel(L"BMP Images", SupportedFormats::kBmp),
+              SupportedFormats::BuildPattern(SupportedFormats::kBmp));
+    addFilter(SupportedFormats::BuildFilterLabel(L"TIFF Images", SupportedFormats::kTiff),
+              SupportedFormats::BuildPattern(SupportedFormats::kTiff));
+    addFilter(SupportedFormats::BuildFilterLabel(L"SVG Vector Images", SupportedFormats::kSvg),
+              SupportedFormats::BuildPattern(SupportedFormats::kSvg));
+    addFilter(SupportedFormats::BuildFilterLabel(L"Icons", SupportedFormats::kIco),
+              SupportedFormats::BuildPattern(SupportedFormats::kIco));
+    addFilter(SupportedFormats::BuildFilterLabel(L"AVIF / HEIC / HEIF Images", SupportedFormats::kAvifHeif),
+              SupportedFormats::BuildPattern(SupportedFormats::kAvifHeif));
     addFilter(L"All Files (*.*)", L"*.*");
     filter.push_back(L'\0'); // double-null terminator
 
@@ -1292,9 +1301,12 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
             HDROP hDrop = reinterpret_cast<HDROP>(wParam);
             UINT count = DragQueryFileW(hDrop, 0xFFFFFFFF, nullptr, 0);
             for (UINT i = 0; i < count; ++i) {
-                wchar_t filePath[MAX_PATH];
-                if (DragQueryFileW(hDrop, i, filePath, MAX_PATH) > 0) {
-                    m_tabManager.OpenTab(filePath);
+                UINT len = DragQueryFileW(hDrop, i, nullptr, 0);
+                if (len > 0) {
+                    std::vector<wchar_t> filePath(len + 1);
+                    if (DragQueryFileW(hDrop, i, filePath.data(), len + 1) > 0) {
+                        m_tabManager.OpenTab(filePath.data());
+                    }
                 }
             }
             DragFinish(hDrop);
@@ -1401,9 +1413,7 @@ void AppWindow::RegisterShellAssociations() {
                        static_cast<DWORD>((value.length() + 1) * sizeof(wchar_t)));
     };
 
-    std::vector<std::wstring> extensions;
-    for (const wchar_t* e : SupportedFormats::kStandard) extensions.emplace_back(e);
-    for (const wchar_t* e : SupportedFormats::kRaw) extensions.emplace_back(e);
+    const auto extensions = SupportedFormats::GetAllExtensions();
 
     const wchar_t* progId = L"LightPhotoViewer.Image";
 
@@ -1503,9 +1513,7 @@ void AppWindow::UnregisterShellAssociations() {
         RegCloseKey(hKeyRegApps);
     }
 
-    std::vector<std::wstring> extensions;
-    for (const wchar_t* e : SupportedFormats::kStandard) extensions.emplace_back(e);
-    for (const wchar_t* e : SupportedFormats::kRaw) extensions.emplace_back(e);
+    const auto extensions = SupportedFormats::GetAllExtensions();
 
     for (const auto& ext : extensions) {
         std::wstring keyPath = L"Software\\Classes\\" + ext + L"\\OpenWithProgids";

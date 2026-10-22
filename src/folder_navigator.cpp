@@ -18,13 +18,7 @@ FolderNavigator::~FolderNavigator() {
 }
 
 bool FolderNavigator::IsSupportedExtension(const std::wstring& ext) {
-    std::wstring lower = ext;
-    std::transform(lower.begin(), lower.end(), lower.begin(), ::towlower);
-
-    for (const wchar_t* supported : SupportedFormats::kStandard) {
-        if (lower == supported) return true;
-    }
-    return ImageEngine::IsRawExtension(lower);
+    return SupportedFormats::IsSupported(ext);
 }
 
 void FolderNavigator::ScanFolder(const std::wstring& folderPath, const std::wstring& initialFile) {
