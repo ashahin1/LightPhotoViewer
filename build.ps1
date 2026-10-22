@@ -130,7 +130,7 @@ $commonFlags = @(
 if ($Debug) {
     $optFlags = @("/Od", "/MTd", "/Zi", "/D_DEBUG")
 } else {
-    $optFlags = @("/O2", "/MT", "/GL", "/Gy", "/Gw", "/DNDEBUG")
+    $optFlags = @("/O1", "/MT", "/GL", "/Gy", "/Gw", "/DNDEBUG")
 }
 
 if ($needPch) {

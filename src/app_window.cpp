@@ -380,6 +380,7 @@ void AppWindow::ShowContextMenu(int x, int y) {
     AppendMenuW(hMenu, MF_STRING, IDM_FILE_OPEN, L"Open Image...\tCtrl+O");
     AppendMenuW(hMenu, MF_STRING, IDM_FILE_REOPEN_TAB, L"Reopen Closed Tab\tCtrl+Shift+T");
     if (hasDoc) {
+        AppendMenuW(hMenu, MF_STRING, IDM_FILE_EXPORT, L"Export / Convert Image...\tCtrl+S");
         AppendMenuW(hMenu, MF_STRING, IDM_FILE_PRINT, L"Print...\tCtrl+P");
     }
     AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
@@ -584,6 +585,7 @@ void AppWindow::HandleHudAction(HudButtonId id) {
         case HudButtonId::RotateCCW: RotateCCW(); break;
         case HudButtonId::RotateCW:  RotateCW(); break;
         case HudButtonId::Info:      m_showExif = !m_showExif; Invalidate(); break;
+        case HudButtonId::Export:    OpenExportModal(); break;
         case HudButtonId::Delete:    DeleteCurrentFile(); break;
         default: break;
     }
@@ -620,7 +622,7 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         case WM_PAINT: {
             PAINTSTRUCT ps;
             BeginPaint(m_hWnd, &ps);
-            m_renderer.Render(m_tabManager, m_hudAlpha, m_showExif, m_showHelp, m_isSlideshow, m_printSettings, m_mousePt);
+            m_renderer.Render(m_tabManager, m_hudAlpha, m_showExif, m_showHelp, m_isSlideshow, m_printSettings, m_exportSettings, m_mousePt);
             EndPaint(m_hWnd, &ps);
             return 0;
         }
@@ -636,7 +638,15 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
             m_lastMouseMoveTick = GetTickCount64();
             m_hudAlpha = 1.0f;
 
-            if (m_isPanning) {
+            if (m_exportSettings.isActive && m_exportSettings.isDraggingQualitySlider) {
+                D2D1_RECT_F sRect = m_renderer.GetExportQualitySliderRect();
+                float w = sRect.right - sRect.left;
+                if (w > 1.0f) {
+                    float t = (static_cast<float>(m_mousePt.x) - sRect.left) / w;
+                    m_exportSettings.quality = std::clamp(static_cast<int>(t * 100.0f + 0.5f), 1, 100);
+                    Invalidate();
+                }
+            } else if (m_isPanning) {
                 TabItem* tab = m_tabManager.GetActiveTab();
                 if (tab) {
                     float dx = static_cast<float>(m_mousePt.x - m_lastPanPt.x);
@@ -664,6 +674,65 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
 
         case WM_LBUTTONDOWN: {
             POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+
+            // If Export Modal is active, handle overlay controls or backdrop click
+            if (m_exportSettings.isActive) {
+                ExportUiId expId = m_renderer.HitTestExportUi(pt);
+
+                // 1. Check if clicking inside the open format dropdown
+                if (m_exportSettings.isFormatDropdownOpen) {
+                    if (expId == ExportUiId::FormatDropdownItem) {
+                        int idx = m_renderer.GetHitExportDropdownIndex();
+                        const auto& formats = ImageEngine::GetExportFormats();
+                        if (idx >= 0 && idx < static_cast<int>(formats.size())) {
+                            m_exportSettings.format = formats[idx].format;
+                            if (!formats[idx].supportsAlpha && m_exportSettings.matte == ExportMatte::KeepAlpha) {
+                                m_exportSettings.matte = ExportMatte::White;
+                            }
+                            UpdateExportEstimate();
+                        }
+                        m_exportSettings.isFormatDropdownOpen = false;
+                        Invalidate();
+                        return 0;
+                    } else {
+                        m_exportSettings.isFormatDropdownOpen = false;
+                        if (expId == ExportUiId::FormatDropdownBtn) {
+                            Invalidate();
+                            return 0;
+                        }
+                    }
+                }
+
+                // 2. Commit active numeric edit field if clicking outside it
+                if (m_exportSettings.activeEditField != ExportEditField::None) {
+                    bool clickedSameField =
+                        (m_exportSettings.activeEditField == ExportEditField::Quality && expId == ExportUiId::QualityInputBox) ||
+                        (m_exportSettings.activeEditField == ExportEditField::Width   && expId == ExportUiId::WidthInputBox) ||
+                        (m_exportSettings.activeEditField == ExportEditField::Height  && expId == ExportUiId::HeightInputBox);
+                    if (!clickedSameField) {
+                        m_exportSettings.CommitEditField();
+                        UpdateExportEstimate();
+                    }
+                }
+
+                // 3. Slider track click & drag
+                if (expId == ExportUiId::QualitySliderTrack) {
+                    m_exportSettings.isDraggingQualitySlider = true;
+                    SetCapture(m_hWnd);
+                    D2D1_RECT_F sRect = m_renderer.GetExportQualitySliderRect();
+                    float w = sRect.right - sRect.left;
+                    if (w > 1.0f) {
+                        float t = (static_cast<float>(pt.x) - sRect.left) / w;
+                        m_exportSettings.quality = std::clamp(static_cast<int>(t * 100.0f + 0.5f), 1, 100);
+                    }
+                    Invalidate();
+                    return 0;
+                }
+
+                // 4. Dispatch control actions
+                HandleExportUiClick(expId);
+                return 0;
+            }
 
             // If Print Preview is active, handle overlay controls or backdrop click
             if (m_printSettings.isActive) {
@@ -810,6 +879,13 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         }
 
         case WM_LBUTTONUP: {
+            if (m_exportSettings.isDraggingQualitySlider) {
+                m_exportSettings.isDraggingQualitySlider = false;
+                ReleaseCapture();
+                UpdateExportEstimate();
+                Invalidate();
+                return 0;
+            }
             if (m_isPanning) {
                 m_isPanning = false;
                 ReleaseCapture();
@@ -881,7 +957,146 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
             bool ctrlDown = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
             bool shiftDown = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
 
-            // 1. Strict Modal Isolation: Print Preview
+            // 1. Strict Modal Isolation: Export & Convert Modal
+            if (m_exportSettings.isActive) {
+                const auto& formats = ImageEngine::GetExportFormats();
+                int fmtCount = static_cast<int>(formats.size());
+                int curFmtIdx = std::clamp(static_cast<int>(m_exportSettings.format), 0, fmtCount - 1);
+
+                // 1a. Format dropdown navigation
+                if (m_exportSettings.isFormatDropdownOpen) {
+                    if (wParam == VK_ESCAPE) {
+                        m_exportSettings.isFormatDropdownOpen = false;
+                        Invalidate();
+                        return 0;
+                    }
+                    if (wParam == VK_UP) {
+                        curFmtIdx = (curFmtIdx - 1 + fmtCount) % fmtCount;
+                        m_exportSettings.format = formats[curFmtIdx].format;
+                        if (!formats[curFmtIdx].supportsAlpha && m_exportSettings.matte == ExportMatte::KeepAlpha) {
+                            m_exportSettings.matte = ExportMatte::White;
+                        }
+                        UpdateExportEstimate();
+                        Invalidate();
+                        return 0;
+                    }
+                    if (wParam == VK_DOWN) {
+                        curFmtIdx = (curFmtIdx + 1) % fmtCount;
+                        m_exportSettings.format = formats[curFmtIdx].format;
+                        if (!formats[curFmtIdx].supportsAlpha && m_exportSettings.matte == ExportMatte::KeepAlpha) {
+                            m_exportSettings.matte = ExportMatte::White;
+                        }
+                        UpdateExportEstimate();
+                        Invalidate();
+                        return 0;
+                    }
+                    if (wParam == VK_RETURN) {
+                        m_exportSettings.isFormatDropdownOpen = false;
+                        Invalidate();
+                        return 0;
+                    }
+                    return 0;
+                }
+
+                // 1b. Active numeric edit field (Quality, Width, Height)
+                if (m_exportSettings.activeEditField != ExportEditField::None) {
+                    if (wParam == VK_RETURN) {
+                        m_exportSettings.CommitEditField();
+                        UpdateExportEstimate();
+                        Invalidate();
+                        return 0;
+                    }
+                    if (wParam == VK_ESCAPE) {
+                        m_exportSettings.CancelEditField();
+                        Invalidate();
+                        return 0;
+                    }
+                    if (wParam == VK_TAB) {
+                        ExportEditField prevField = m_exportSettings.activeEditField;
+                        m_exportSettings.CommitEditField();
+                        UpdateExportEstimate();
+                        if (prevField == ExportEditField::Width) {
+                            m_exportSettings.activeEditField = ExportEditField::Height;
+                            m_exportSettings.editBuffer = std::to_wstring(m_exportSettings.targetHeight);
+                        } else if (prevField == ExportEditField::Height) {
+                            m_exportSettings.activeEditField = ExportEditField::Width;
+                            m_exportSettings.editBuffer = std::to_wstring(m_exportSettings.targetWidth);
+                        }
+                        Invalidate();
+                        return 0;
+                    }
+                    if (wParam == VK_BACK) {
+                        if (!m_exportSettings.editBuffer.empty()) {
+                            m_exportSettings.editBuffer.pop_back();
+                            Invalidate();
+                        }
+                        return 0;
+                    }
+                    if ((wParam >= '0' && wParam <= '9') || (wParam >= VK_NUMPAD0 && wParam <= VK_NUMPAD9)) {
+                        wchar_t digit = (wParam >= '0' && wParam <= '9')
+                            ? static_cast<wchar_t>(wParam)
+                            : static_cast<wchar_t>('0' + (wParam - VK_NUMPAD0));
+                        size_t maxLen = (m_exportSettings.activeEditField == ExportEditField::Quality) ? 3 : 4;
+                        if (m_exportSettings.editBuffer.length() < maxLen) {
+                            m_exportSettings.editBuffer += digit;
+                            Invalidate();
+                        }
+                        return 0;
+                    }
+                    return 0;
+                }
+
+                // 1c. Modal shortcuts
+                if (wParam == VK_ESCAPE) {
+                    CloseExportModal();
+                    return 0;
+                }
+                if (wParam == VK_RETURN || (ctrlDown && wParam == 'S')) {
+                    ExecuteExportSaveDialog();
+                    return 0;
+                }
+
+                // Animation frame stepping with [ and ]
+                if (m_exportSettings.isAnimated && m_exportSettings.totalFrameCount > 1) {
+                    if (wParam == VK_OEM_4) { // '['
+                        if (m_exportSettings.selectedFrameIdx == 0) {
+                            m_exportSettings.selectedFrameIdx = m_exportSettings.totalFrameCount - 1;
+                        } else {
+                            m_exportSettings.selectedFrameIdx--;
+                        }
+                        UpdateExportEstimate();
+                        Invalidate();
+                        return 0;
+                    }
+                    if (wParam == VK_OEM_6) { // ']'
+                        m_exportSettings.selectedFrameIdx = (m_exportSettings.selectedFrameIdx + 1) % m_exportSettings.totalFrameCount;
+                        UpdateExportEstimate();
+                        Invalidate();
+                        return 0;
+                    }
+                }
+
+                // Left / Right arrow keys adjust quality by +/- 1% when a lossy format is active
+                if (formats[curFmtIdx].supportsQuality) {
+                    if (wParam == VK_LEFT && m_exportSettings.quality > 1) {
+                        m_exportSettings.quality--;
+                        UpdateExportEstimate();
+                        Invalidate();
+                        return 0;
+                    }
+                    if (wParam == VK_RIGHT && m_exportSettings.quality < 100) {
+                        m_exportSettings.quality++;
+                        UpdateExportEstimate();
+                        Invalidate();
+                        return 0;
+                    }
+                }
+
+                // Strictly suppress all other keys while Export Modal is open
+                return 0;
+            }
+
+            // 2. Strict Modal Isolation: Print Preview
             if (m_printSettings.isActive) {
                 // If a dropdown list is open, handle navigation or closing
                 if (m_printSettings.openDropdown != PrintDropdownState::None) {
@@ -1001,6 +1216,11 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
             if (ctrlDown) {
                 switch (wParam) {
                     case 'O': OpenFileDialog(); return 0;
+                    case 'S': {
+                        if (m_exportSettings.isActive) ExecuteExportSaveDialog();
+                        else OpenExportModal();
+                        return 0;
+                    }
                     case 'P': {
                         if (m_printSettings.isActive) ExecutePrintJob();
                         else OpenPrintPreview();
@@ -1234,6 +1454,7 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
             switch (LOWORD(wParam)) {
                 case IDM_FILE_OPEN:       OpenFileDialog(); return 0;
                 case IDM_FILE_REOPEN_TAB: ReopenClosedTab(); return 0;
+                case IDM_FILE_EXPORT:     OpenExportModal(); return 0;
                 case IDM_FILE_PRINT:      OpenPrintPreview(); return 0;
                 case IDM_NAV_NEXT:        NextImage(); return 0;
                 case IDM_NAV_PREV:        PrevImage(); return 0;
@@ -1336,7 +1557,7 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
 
                 // 1. GIF Frame Animation update
                 TabItem* tab = m_tabManager.GetActiveTab();
-                if (!m_printSettings.isActive && tab && tab->document && tab->document->metadata.isAnimated) {
+                if (!m_printSettings.isActive && !m_exportSettings.isActive && tab && tab->document && tab->document->metadata.isAnimated) {
                     size_t frameCount = tab->document->GetFrameCount();
                     if (frameCount > 1) {
                         ULONGLONG now = GetTickCount64();
@@ -1944,5 +2165,369 @@ void AppWindow::SpoolPageToHdc(HDC hdc) {
             EndPage(hdc);
         }
         EndDoc(hdc);
+    }
+}
+
+void AppWindow::OpenExportModal() {
+    TabItem* tab = m_tabManager.GetActiveTab();
+    if (!tab || !tab->document || !tab->document->isValid) {
+        return;
+    }
+
+    // Close other modals if active
+    m_printSettings.isActive = false;
+    m_showHelp = false;
+
+    UINT srcW = std::max(1U, tab->document->GetWidth());
+    UINT srcH = std::max(1U, tab->document->GetHeight());
+    bool isRot90 = m_exportSettings.bakeTransforms && (tab->rotationDegrees == 90 || tab->rotationDegrees == 270);
+    m_exportSettings.baseWidth  = isRot90 ? srcH : srcW;
+    m_exportSettings.baseHeight = isRot90 ? srcW : srcH;
+    m_exportSettings.ApplyScalePreset(ExportScalePreset::Scale100);
+
+    const auto& formats = ImageEngine::GetExportFormats();
+    int fmtIdx = std::clamp(static_cast<int>(m_exportSettings.format), 0, static_cast<int>(formats.size() - 1));
+    if (!formats[fmtIdx].supportsAlpha && m_exportSettings.matte == ExportMatte::KeepAlpha) {
+        m_exportSettings.matte = ExportMatte::White;
+    }
+
+    size_t frameCount = tab->document->GetFrameCount();
+    m_exportSettings.totalFrameCount = frameCount;
+    m_exportSettings.isAnimated = tab->document->metadata.isAnimated && (frameCount > 1);
+    m_exportSettings.selectedFrameIdx = (tab->currentFrame < frameCount) ? tab->currentFrame : 0;
+
+    m_exportSettings.isFormatDropdownOpen = false;
+    m_exportSettings.isDraggingQualitySlider = false;
+    m_exportSettings.activeEditField = ExportEditField::None;
+    m_exportSettings.editBuffer.clear();
+
+    UpdateExportEstimate();
+    m_exportSettings.isActive = true;
+    Invalidate();
+}
+
+void AppWindow::CloseExportModal() {
+    if (m_exportSettings.isDraggingQualitySlider) {
+        m_exportSettings.isDraggingQualitySlider = false;
+        ReleaseCapture();
+    }
+    TabItem* tab = m_tabManager.GetActiveTab();
+    if (tab) {
+        if (m_exportSettings.isAnimated && m_exportSettings.totalFrameCount > 1) {
+            tab->currentFrame = m_exportSettings.selectedFrameIdx;
+        }
+        tab->lastFrameTick = GetTickCount64();
+    }
+    m_exportSettings.isFormatDropdownOpen = false;
+    m_exportSettings.activeEditField = ExportEditField::None;
+    m_exportSettings.editBuffer.clear();
+    m_exportSettings.isActive = false;
+    Invalidate();
+}
+
+void AppWindow::UpdateExportEstimate() {
+    m_exportSettings.encodeValid = false;
+    m_exportSettings.encodedBytes.clear();
+
+    TabItem* tab = m_tabManager.GetActiveTab();
+    if (!tab || !tab->document || !tab->document->isValid) return;
+
+    UINT srcW = std::max(1U, tab->document->GetWidth());
+    UINT srcH = std::max(1U, tab->document->GetHeight());
+    bool isRot90 = m_exportSettings.bakeTransforms && (tab->rotationDegrees == 90 || tab->rotationDegrees == 270);
+    m_exportSettings.baseWidth  = isRot90 ? srcH : srcW;
+    m_exportSettings.baseHeight = isRot90 ? srcW : srcH;
+
+    if (m_exportSettings.scalePreset != ExportScalePreset::Custom) {
+        m_exportSettings.ApplyScalePreset(m_exportSettings.scalePreset);
+    }
+
+    ExportEncodeParams params;
+    params.format          = m_exportSettings.format;
+    params.quality         = m_exportSettings.quality;
+    params.targetWidth     = m_exportSettings.targetWidth;
+    params.targetHeight    = m_exportSettings.targetHeight;
+    params.rotationDegrees = m_exportSettings.bakeTransforms ? tab->rotationDegrees : 0;
+    params.flipH           = m_exportSettings.bakeTransforms ? tab->flipH : false;
+    params.flipV           = m_exportSettings.bakeTransforms ? tab->flipV : false;
+    params.matte           = m_exportSettings.matte;
+
+    if (tab->document->metadata.isSvg && tab->svgDocument) {
+        // Rasterize SVG directly at pre-rotated target resolution
+        UINT svgRasterW = isRot90 ? params.targetHeight : params.targetWidth;
+        UINT svgRasterH = isRot90 ? params.targetWidth  : params.targetHeight;
+        svgRasterW = std::clamp(svgRasterW, 1U, 4096U);
+        svgRasterH = std::clamp(svgRasterH, 1U, 4096U);
+
+        std::vector<uint32_t> svgPixels;
+        if (m_renderer.RasterizeSvgToPixels(tab->svgDocument.Get(), svgRasterW, svgRasterH, svgPixels)) {
+            m_exportSettings.encodeValid = ImageEngine::Instance().EncodeBitmapToMemory(
+                nullptr,
+                &svgPixels,
+                svgRasterW,
+                svgRasterH,
+                params,
+                m_exportSettings.encodedBytes
+            );
+            return;
+        }
+    }
+
+    size_t frameIdx = m_exportSettings.isAnimated ? m_exportSettings.selectedFrameIdx : tab->currentFrame;
+    const FrameData* fd = tab->document->GetFrame(frameIdx);
+    if (!fd || !fd->bitmap) return;
+
+    m_exportSettings.encodeValid = ImageEngine::Instance().EncodeBitmapToMemory(
+        fd->bitmap.Get(),
+        nullptr,
+        fd->width,
+        fd->height,
+        params,
+        m_exportSettings.encodedBytes
+    );
+}
+
+void AppWindow::HandleExportUiClick(ExportUiId id) {
+    switch (id) {
+        case ExportUiId::None:
+        case ExportUiId::CloseModal:
+        case ExportUiId::CancelBtn:
+            CloseExportModal();
+            break;
+
+        case ExportUiId::CardBody:
+            Invalidate();
+            break;
+
+        case ExportUiId::FormatDropdownBtn:
+            m_exportSettings.isFormatDropdownOpen = !m_exportSettings.isFormatDropdownOpen;
+            Invalidate();
+            break;
+
+        case ExportUiId::FramePrev:
+            if (m_exportSettings.isAnimated && m_exportSettings.totalFrameCount > 1) {
+                if (m_exportSettings.selectedFrameIdx == 0) {
+                    m_exportSettings.selectedFrameIdx = m_exportSettings.totalFrameCount - 1;
+                } else {
+                    m_exportSettings.selectedFrameIdx--;
+                }
+                UpdateExportEstimate();
+                Invalidate();
+            }
+            break;
+
+        case ExportUiId::FrameNext:
+            if (m_exportSettings.isAnimated && m_exportSettings.totalFrameCount > 1) {
+                m_exportSettings.selectedFrameIdx = (m_exportSettings.selectedFrameIdx + 1) % m_exportSettings.totalFrameCount;
+                UpdateExportEstimate();
+                Invalidate();
+            }
+            break;
+
+        case ExportUiId::QualityMinus:
+            if (m_exportSettings.quality > 1) {
+                m_exportSettings.quality--;
+                UpdateExportEstimate();
+                Invalidate();
+            }
+            break;
+
+        case ExportUiId::QualityPlus:
+            if (m_exportSettings.quality < 100) {
+                m_exportSettings.quality++;
+                UpdateExportEstimate();
+                Invalidate();
+            }
+            break;
+
+        case ExportUiId::QualityInputBox:
+            m_exportSettings.activeEditField = ExportEditField::Quality;
+            m_exportSettings.editBuffer = std::to_wstring(m_exportSettings.quality);
+            Invalidate();
+            break;
+
+        case ExportUiId::Scale100:
+            m_exportSettings.ApplyScalePreset(ExportScalePreset::Scale100);
+            UpdateExportEstimate();
+            Invalidate();
+            break;
+        case ExportUiId::Scale75:
+            m_exportSettings.ApplyScalePreset(ExportScalePreset::Scale75);
+            UpdateExportEstimate();
+            Invalidate();
+            break;
+        case ExportUiId::Scale50:
+            m_exportSettings.ApplyScalePreset(ExportScalePreset::Scale50);
+            UpdateExportEstimate();
+            Invalidate();
+            break;
+        case ExportUiId::Scale25:
+            m_exportSettings.ApplyScalePreset(ExportScalePreset::Scale25);
+            UpdateExportEstimate();
+            Invalidate();
+            break;
+        case ExportUiId::ScaleCustom:
+            m_exportSettings.scalePreset = ExportScalePreset::Custom;
+            m_exportSettings.activeEditField = ExportEditField::Width;
+            m_exportSettings.editBuffer = std::to_wstring(m_exportSettings.targetWidth);
+            Invalidate();
+            break;
+
+        case ExportUiId::WidthInputBox:
+            m_exportSettings.activeEditField = ExportEditField::Width;
+            m_exportSettings.editBuffer = std::to_wstring(m_exportSettings.targetWidth);
+            Invalidate();
+            break;
+
+        case ExportUiId::HeightInputBox:
+            m_exportSettings.activeEditField = ExportEditField::Height;
+            m_exportSettings.editBuffer = std::to_wstring(m_exportSettings.targetHeight);
+            Invalidate();
+            break;
+
+        case ExportUiId::AspectLockBtn:
+            m_exportSettings.lockAspect = !m_exportSettings.lockAspect;
+            if (m_exportSettings.lockAspect && m_exportSettings.baseWidth > 0) {
+                m_exportSettings.targetHeight = std::max(
+                    1U,
+                    static_cast<UINT>((static_cast<double>(m_exportSettings.targetWidth) * m_exportSettings.baseHeight) / m_exportSettings.baseWidth + 0.5)
+                );
+                UpdateExportEstimate();
+            }
+            Invalidate();
+            break;
+
+        case ExportUiId::TransformBake:
+            if (!m_exportSettings.bakeTransforms) {
+                m_exportSettings.bakeTransforms = true;
+                UpdateExportEstimate();
+                Invalidate();
+            }
+            break;
+
+        case ExportUiId::TransformOriginal:
+            if (m_exportSettings.bakeTransforms) {
+                m_exportSettings.bakeTransforms = false;
+                UpdateExportEstimate();
+                Invalidate();
+            }
+            break;
+
+        case ExportUiId::MatteKeepAlpha: {
+            const auto& formats = ImageEngine::GetExportFormats();
+            int fmtIdx = std::clamp(static_cast<int>(m_exportSettings.format), 0, static_cast<int>(formats.size() - 1));
+            if (formats[fmtIdx].supportsAlpha && m_exportSettings.matte != ExportMatte::KeepAlpha) {
+                m_exportSettings.matte = ExportMatte::KeepAlpha;
+                UpdateExportEstimate();
+                Invalidate();
+            }
+            break;
+        }
+
+        case ExportUiId::MatteWhite:
+            if (m_exportSettings.matte != ExportMatte::White) {
+                m_exportSettings.matte = ExportMatte::White;
+                UpdateExportEstimate();
+                Invalidate();
+            }
+            break;
+
+        case ExportUiId::MatteBlack:
+            if (m_exportSettings.matte != ExportMatte::Black) {
+                m_exportSettings.matte = ExportMatte::Black;
+                UpdateExportEstimate();
+                Invalidate();
+            }
+            break;
+
+        case ExportUiId::ExecuteExport:
+            ExecuteExportSaveDialog();
+            break;
+
+        default:
+            break;
+    }
+}
+
+void AppWindow::ExecuteExportSaveDialog() {
+    TabItem* tab = m_tabManager.GetActiveTab();
+    if (!tab || !tab->document || !tab->document->isValid) return;
+
+    if (m_exportSettings.activeEditField != ExportEditField::None) {
+        m_exportSettings.CommitEditField();
+        UpdateExportEstimate();
+    }
+    if (!m_exportSettings.encodeValid || m_exportSettings.encodedBytes.empty()) {
+        UpdateExportEstimate();
+    }
+    if (!m_exportSettings.encodeValid || m_exportSettings.encodedBytes.empty()) {
+        MessageBoxW(m_hWnd, L"Failed to encode image into the selected format.", L"Export Error", MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    const auto& formats = ImageEngine::GetExportFormats();
+    int fmtIdx = std::clamp(static_cast<int>(m_exportSettings.format), 0, static_cast<int>(formats.size() - 1));
+    const ExportFormatInfo& fmtInfo = formats[fmtIdx];
+
+    std::filesystem::path srcPath(tab->document->metadata.filePath);
+    std::wstring dirPath = srcPath.parent_path().wstring();
+    std::wstring stem = srcPath.stem().wstring();
+    if (stem.empty()) stem = L"exported_image";
+
+    std::filesystem::path defaultOutPath = srcPath.parent_path() / (stem + fmtInfo.defaultExt);
+    std::error_code ec;
+    if (std::filesystem::equivalent(srcPath, defaultOutPath, ec) ||
+        _wcsicmp(srcPath.wstring().c_str(), defaultOutPath.wstring().c_str()) == 0) {
+        defaultOutPath = srcPath.parent_path() / (stem + L"_converted" + fmtInfo.defaultExt);
+    }
+
+    std::vector<wchar_t> fileBuf(32768, L'\0');
+    std::wstring defaultFileStr = defaultOutPath.wstring();
+    wcsncpy_s(fileBuf.data(), fileBuf.size(), defaultFileStr.c_str(), _TRUNCATE);
+
+    // Build filter string for the active format + All Files
+    std::wstring filter;
+    const wchar_t* pSpec = fmtInfo.filterSpec;
+    while (*pSpec) {
+        std::wstring part(pSpec);
+        filter += part;
+        filter.push_back(L'\0');
+        pSpec += part.length() + 1;
+    }
+    const std::wstring allFilesDesc = L"All Files (*.*)";
+    const std::wstring allFilesPat  = L"*.*";
+    filter += allFilesDesc;
+    filter.push_back(L'\0');
+    filter += allFilesPat;
+    filter.push_back(L'\0');
+    filter.push_back(L'\0');
+
+    const wchar_t* defExtNoDot = (fmtInfo.defaultExt[0] == L'.') ? (fmtInfo.defaultExt + 1) : fmtInfo.defaultExt;
+
+    OPENFILENAMEW ofn = {};
+    ofn.lStructSize = sizeof(OPENFILENAMEW);
+    ofn.hwndOwner = m_hWnd;
+    ofn.lpstrFilter = filter.c_str();
+    ofn.nFilterIndex = 1;
+    ofn.lpstrFile = fileBuf.data();
+    ofn.nMaxFile = static_cast<DWORD>(fileBuf.size());
+    ofn.lpstrInitialDir = dirPath.empty() ? nullptr : dirPath.c_str();
+    ofn.lpstrTitle = L"Export / Convert Image As";
+    ofn.lpstrDefExt = defExtNoDot;
+    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_ENABLESIZING |
+                OFN_EXPLORER | OFN_NOCHANGEDIR | OFN_HIDEREADONLY;
+
+    if (GetSaveFileNameW(&ofn)) {
+        std::wstring savePath = fileBuf.data();
+        if (ImageEngine::WriteBytesToFileAtomic(savePath, m_exportSettings.encodedBytes)) {
+            CloseExportModal();
+        } else {
+            MessageBoxW(
+                m_hWnd,
+                (L"Failed to write exported image to disk:\n" + savePath).c_str(),
+                L"Export Error",
+                MB_OK | MB_ICONERROR
+            );
+        }
     }
 }

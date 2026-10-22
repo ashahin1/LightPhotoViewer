@@ -43,6 +43,9 @@ private:
     // Print Preview & Spooler
     PrintSettings m_printSettings;
 
+    // Image Export & Conversion Modal
+    ExportSettings m_exportSettings;
+
     void Invalidate();
     void UpdateWindowTitle();
     void ToggleFullscreen();
@@ -64,6 +67,12 @@ private:
     void ExecutePrintJob();
     void OpenSystemPrintDialog();
     void SpoolPageToHdc(HDC hdc);
+
+    void OpenExportModal();
+    void CloseExportModal();
+    void UpdateExportEstimate();
+    void HandleExportUiClick(ExportUiId id);
+    void ExecuteExportSaveDialog();
 
     void NextImage();
     void PrevImage();

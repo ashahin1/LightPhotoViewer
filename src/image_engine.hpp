@@ -41,6 +41,43 @@ public:
     }
 };
 
+enum class ExportFormat : int {
+    Jpeg = 0,   // .jpg  (GUID_ContainerFormatJpeg)
+    Png  = 1,   // .png  (GUID_ContainerFormatPng)
+    Bmp  = 2,   // .bmp  (GUID_ContainerFormatBmp)
+    Tiff = 3,   // .tiff (GUID_ContainerFormatTiff)
+    Gif  = 4,   // .gif  (GUID_ContainerFormatGif)
+    Jxr  = 5    // .jxr  (GUID_ContainerFormatWmp)
+};
+
+enum class ExportMatte : int {
+    KeepAlpha = 0, // Preserves alpha on PNG, TIFF, 32-bit BMP, JXR (falls back to White on JPEG)
+    White     = 1, // Flatten alpha over #FFFFFF
+    Black     = 2  // Flatten alpha over #000000
+};
+
+struct ExportFormatInfo {
+    ExportFormat format;
+    const wchar_t* displayName;
+    const wchar_t* shortName;
+    const wchar_t* defaultExt;
+    const wchar_t* filterSpec;
+    GUID containerGuid;
+    bool supportsQuality;
+    bool supportsAlpha;
+};
+
+struct ExportEncodeParams {
+    ExportFormat format = ExportFormat::Jpeg;
+    int quality = 92;               // 1..100
+    UINT targetWidth = 0;           // 1..8192
+    UINT targetHeight = 0;          // 1..8192
+    int rotationDegrees = 0;        // 0, 90, 180, 270
+    bool flipH = false;
+    bool flipV = false;
+    ExportMatte matte = ExportMatte::White;
+};
+
 class ImageEngine {
 public:
     static ImageEngine& Instance();
@@ -51,6 +88,17 @@ public:
     std::shared_ptr<ImageDocument> LoadFromFile(const std::wstring& filePath);
     bool CopyToClipboard(HWND hWnd, const FrameData& frame);
     static bool IsRawExtension(const std::wstring& ext);
+
+    static const std::vector<ExportFormatInfo>& GetExportFormats();
+    bool EncodeBitmapToMemory(
+        IWICBitmapSource* rawSource,
+        const std::vector<uint32_t>* preRasterizedPixels,
+        UINT srcW,
+        UINT srcH,
+        const ExportEncodeParams& params,
+        std::vector<BYTE>& outBytes
+    );
+    static bool WriteBytesToFileAtomic(const std::wstring& destPath, const std::vector<BYTE>& bytes);
 
 private:
     ImageEngine() = default;

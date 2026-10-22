@@ -7,7 +7,7 @@
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://isocpp.org/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-0078D6.svg)](https://www.microsoft.com/windows)
 [![Release](https://img.shields.io/github/v/release/ashahin1/LightPhotoViewer?color=blue)](https://github.com/ashahin1/LightPhotoViewer/releases)
-[![Binary Size](https://img.shields.io/badge/Binary%20Size-470%20KB-brightgreen.svg)]()
+[![Binary Size](https://img.shields.io/badge/Binary%20Size-477%20KB-brightgreen.svg)]()
 [![Private RAM](https://img.shields.io/badge/Private%20RAM-35--55%20MB-success.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -24,7 +24,7 @@ Measured on Windows 11 (64-bit) with cold execution and hardware performance cou
 
 | Metric | LightPhotoViewer | Windows Photos | ImageGlass | IrfanView |
 | :--- | :---: | :---: | :---: | :---: |
-| **Standalone Binary Size** | **470 KB** | ~150 MB | ~65 MB | ~3 MB |
+| **Standalone Binary Size** | **477 KB** | ~150 MB | ~65 MB | ~3 MB |
 | **External Runtime DLLs** | **0** (Native OS only) | 40+ | 30+ | 0–10 |
 | **Cold Startup Latency** | **~220 ms** | ~1,800 ms | ~900 ms | ~120 ms |
 | **Private RAM (4K Image)** | **~35–55 MB** | ~180 MB | ~110 MB | ~40 MB |
@@ -35,7 +35,7 @@ Measured on Windows 11 (64-bit) with cold execution and hardware performance cou
 ## 🚀 Key Highlights
 
 * **Instant Cold Launch**: Opens in ~220 ms with zero XAML, WinUI, or Electron runtime bloat.
-* **Microscopic Footprint**: Single standalone **470 KB** executable with zero external DLL dependencies (`/MT`).
+* **Microscopic Footprint**: Single standalone **477 KB** executable with zero external DLL dependencies (`/MT`).
 * **Comprehensive Camera RAW Support (26+ Formats)**:
   * Native, blazing-fast viewing for professional camera RAW photos from Canon, Nikon, Sony, Adobe DNG, Fujifilm, Olympus, Panasonic, Pentax, Hasselblad, Leica, Sigma, Samsung, Kodak, Minolta, Leaf, Mamiya, and Epson. See the full list in [Supported Formats](#-supported-formats).
   * **2-Tier Intelligent Decoding Pipeline**:
@@ -75,6 +75,11 @@ Measured on Windows 11 (64-bit) with cold execution and hardware performance cou
   * Persistent recent files list on empty state with keyboard shortcuts `1`–`6` and direct click opening.
 * **Interactive `F1` Shortcut Help Overlay**:
   * Press **`F1`** anytime to display an in-canvas categorized Direct2D shortcuts dialog.
+* **In-Canvas Image Export & Format Conversion (`Ctrl+S`)**:
+  * Convert any open image—including all 26+ Camera RAW formats, vector SVG, WebP, AVIF, HEIC, animated GIF frames, PNG, JPEG, BMP, TIFF, and ICO—into **6 native target formats**: **JPEG (`.jpg`)**, **PNG (`.png`)**, **BMP (`.bmp`)**, **TIFF (`.tiff`, LZW)**, **GIF (`.gif`, 256-color dithered)**, and **JPEG XR (`.jxr`)**.
+  * **Real-Time Exact File Size Estimation**: Encodes the output in memory (`CreateStreamOnHGlobal`) and displays the exact output byte size and percentage delta (`Est. Size: 101.4 KB (−68%)`) before saving.
+  * **Interactive Controls**: Smooth quality slider (`1–100%`) with `−` / `+` buttons and click-to-type numeric entry, resolution scale presets (`100%`, `75%`, `50%`, `25%`, `Custom`) with aspect-ratio lock (`🔒`), background alpha matte selector (`Keep Alpha`, `White #FFF`, `Black #000`) with live canvas simulation, orientation baking toggle (`Bake Rot/Flip` vs `Original`), and animated GIF frame stepper (`◀ Frame X of Y ▶`).
+  * **Atomic Disk Writes**: Writes output to a temporary `.lpv_tmp` file first and swaps via `MoveFileExW(MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)` so an interrupted save never corrupts an existing file.
 * **In-Canvas Print Preview & Native Spooling (`Ctrl+P`)**:
   * Live hardware-accelerated WYSIWYG virtual paper sheet preview directly on the Direct2D canvas.
   * Instant interactive controls with custom popover dropdowns for Printers and Paper Size presets (`A4`, `Letter`, `Legal`, `A3`, `A5`, `4×6 in`, `5×7 in`, `8×10 in`).
@@ -180,8 +185,9 @@ LightPhotoViewer is portable: download `LightPhotoViewer.exe` (or the `.zip` wit
 | Shortcut | Action |
 | :--- | :--- |
 | `Ctrl + O` | Open image file dialog |
+| `Ctrl + S` | Open Export / Convert Image modal (or save when modal is open) |
 | `Ctrl + P` | Open Print Preview / Execute print job |
-| `[` / `]` | Previous / Next animation frame (in Print Preview) |
+| `[` / `]` | Previous / Next animation frame (in Export Modal & Print Preview) |
 | `Ctrl + W` | Close active tab |
 | `Ctrl + Shift + T` | Reopen recently closed tab |
 | `Ctrl + Tab` | Next tab |

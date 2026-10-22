@@ -9,6 +9,7 @@
 #define IDM_FILE_EXIT           203
 #define IDM_FILE_REOPEN_TAB     204
 #define IDM_FILE_PRINT          205
+#define IDM_FILE_EXPORT         206
 
 #define IDM_NAV_PREV            210
 #define IDM_NAV_NEXT            211

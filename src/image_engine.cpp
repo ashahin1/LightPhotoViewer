@@ -938,3 +938,308 @@ bool ImageEngine::CopyToClipboard(HWND hWnd, const FrameData& frame) {
     CloseClipboard();
     return true;
 }
+
+const std::vector<ExportFormatInfo>& ImageEngine::GetExportFormats() {
+    static const std::vector<ExportFormatInfo> s_formats = {
+        { ExportFormat::Jpeg, L"JPEG Image (.jpg)",     L"JPEG", L".jpg",  L"JPEG Image (*.jpg;*.jpeg)\0*.jpg;*.jpeg\0", GUID_ContainerFormatJpeg, true,  false },
+        { ExportFormat::Png,  L"PNG Image (.png)",      L"PNG",  L".png",  L"PNG Image (*.png)\0*.png\0",                GUID_ContainerFormatPng,  false, true  },
+        { ExportFormat::Bmp,  L"BMP Image (.bmp)",      L"BMP",  L".bmp",  L"BMP Image (*.bmp)\0*.bmp\0",                GUID_ContainerFormatBmp,  false, true  },
+        { ExportFormat::Tiff, L"TIFF Image (.tiff)",    L"TIFF", L".tiff", L"TIFF Image (*.tiff;*.tif)\0*.tiff;*.tif\0", GUID_ContainerFormatTiff, false, true  },
+        { ExportFormat::Gif,  L"GIF Image (.gif)",      L"GIF",  L".gif",  L"GIF Image (*.gif)\0*.gif\0",                GUID_ContainerFormatGif,  false, false },
+        { ExportFormat::Jxr,  L"JPEG XR Image (.jxr)",  L"JXR",  L".jxr",  L"JPEG XR Image (*.jxr;*.wdp)\0*.jxr;*.wdp\0", GUID_ContainerFormatWmp, true,  true  }
+    };
+    return s_formats;
+}
+
+bool ImageEngine::EncodeBitmapToMemory(
+    IWICBitmapSource* rawSource,
+    const std::vector<uint32_t>* preRasterizedPixels,
+    UINT srcW,
+    UINT srcH,
+    const ExportEncodeParams& params,
+    std::vector<BYTE>& outBytes
+) {
+    outBytes.clear();
+    if (srcW == 0 || srcH == 0) return false;
+    if (!rawSource && (!preRasterizedPixels || preRasterizedPixels->size() < static_cast<size_t>(srcW) * srcH)) {
+        return false;
+    }
+
+    IWICImagingFactory* factory = GetThreadWicFactory();
+    if (!factory) return false;
+
+    // 1. Obtain un-premultiplied 32bppBGRA source pixels
+    std::vector<uint32_t> srcPixels(static_cast<size_t>(srcW) * srcH);
+    if (preRasterizedPixels && preRasterizedPixels->size() >= srcPixels.size()) {
+        memcpy(srcPixels.data(), preRasterizedPixels->data(), srcPixels.size() * sizeof(uint32_t));
+    } else if (rawSource) {
+        ComPtr<IWICFormatConverter> srcConv;
+        if (FAILED(factory->CreateFormatConverter(&srcConv))) return false;
+        if (FAILED(srcConv->Initialize(
+                rawSource,
+                GUID_WICPixelFormat32bppBGRA,
+                WICBitmapDitherTypeNone,
+                nullptr,
+                0.0f,
+                WICBitmapPaletteTypeCustom))) {
+            return false;
+        }
+        WICRect rc = { 0, 0, static_cast<INT>(srcW), static_cast<INT>(srcH) };
+        if (FAILED(srcConv->CopyPixels(
+                &rc,
+                srcW * 4,
+                static_cast<UINT>(srcPixels.size() * sizeof(uint32_t)),
+                reinterpret_cast<BYTE*>(srcPixels.data())))) {
+            return false;
+        }
+    }
+
+    // 2. Apply orientation transforms (rotation + horizontal/vertical flip)
+    int rot = ((params.rotationDegrees % 360) + 360) % 360;
+    bool isRot90 = (rot == 90 || rot == 270);
+    UINT orientedW = isRot90 ? srcH : srcW;
+    UINT orientedH = isRot90 ? srcW : srcH;
+
+    std::vector<uint32_t> orientedPixels(static_cast<size_t>(orientedW) * orientedH);
+    if (rot == 0 && !params.flipH && !params.flipV) {
+        orientedPixels = std::move(srcPixels);
+    } else {
+        for (UINT y = 0; y < orientedH; ++y) {
+            for (UINT x = 0; x < orientedW; ++x) {
+                UINT ox = params.flipH ? (orientedW - 1 - x) : x;
+                UINT oy = params.flipV ? (orientedH - 1 - y) : y;
+
+                UINT sx = ox;
+                UINT sy = oy;
+                switch (rot) {
+                    case 90:  sx = oy; sy = srcH - 1 - ox; break;
+                    case 180: sx = srcW - 1 - ox; sy = srcH - 1 - oy; break;
+                    case 270: sx = srcW - 1 - oy; sy = ox; break;
+                    default:  break;
+                }
+                orientedPixels[static_cast<size_t>(y) * orientedW + x] =
+                    srcPixels[static_cast<size_t>(sy) * srcW + sx];
+            }
+        }
+    }
+
+    // 3. Apply resolution scaling if target dimensions differ from oriented dimensions
+    UINT targetW = (params.targetWidth > 0) ? std::clamp(params.targetWidth, 1U, 8192U) : orientedW;
+    UINT targetH = (params.targetHeight > 0) ? std::clamp(params.targetHeight, 1U, 8192U) : orientedH;
+
+    std::vector<uint32_t> finalPixels;
+    if (targetW == orientedW && targetH == orientedH) {
+        finalPixels = std::move(orientedPixels);
+    } else {
+        ComPtr<IWICBitmap> orientedBmp;
+        if (FAILED(factory->CreateBitmapFromMemory(
+                orientedW,
+                orientedH,
+                GUID_WICPixelFormat32bppBGRA,
+                orientedW * 4,
+                static_cast<UINT>(orientedPixels.size() * sizeof(uint32_t)),
+                reinterpret_cast<BYTE*>(orientedPixels.data()),
+                &orientedBmp))) {
+            return false;
+        }
+
+        ComPtr<IWICBitmapScaler> scaler;
+        if (FAILED(factory->CreateBitmapScaler(&scaler))) return false;
+        if (FAILED(scaler->Initialize(orientedBmp.Get(), targetW, targetH, WICBitmapInterpolationModeHighQualityCubic))) {
+            return false;
+        }
+
+        finalPixels.resize(static_cast<size_t>(targetW) * targetH);
+        WICRect rcScaled = { 0, 0, static_cast<INT>(targetW), static_cast<INT>(targetH) };
+        if (FAILED(scaler->CopyPixels(
+                &rcScaled,
+                targetW * 4,
+                static_cast<UINT>(finalPixels.size() * sizeof(uint32_t)),
+                reinterpret_cast<BYTE*>(finalPixels.data())))) {
+            return false;
+        }
+    }
+
+    // 4. Apply Alpha Matte Flattening if needed
+    const auto& formats = GetExportFormats();
+    int fmtIdx = std::clamp(static_cast<int>(params.format), 0, static_cast<int>(formats.size() - 1));
+    const ExportFormatInfo& fmtInfo = formats[fmtIdx];
+
+    ExportMatte effectiveMatte = params.matte;
+    if (!fmtInfo.supportsAlpha && effectiveMatte == ExportMatte::KeepAlpha) {
+        effectiveMatte = ExportMatte::White;
+    }
+
+    if (effectiveMatte != ExportMatte::KeepAlpha) {
+        const uint32_t matteVal = (effectiveMatte == ExportMatte::White) ? 255U : 0U;
+        BYTE* px = reinterpret_cast<BYTE*>(finalPixels.data());
+        size_t totalPx = finalPixels.size();
+        for (size_t i = 0; i < totalPx; ++i) {
+            uint32_t b = px[i * 4 + 0];
+            uint32_t g = px[i * 4 + 1];
+            uint32_t r = px[i * 4 + 2];
+            uint32_t a = px[i * 4 + 3];
+            if (a < 255U) {
+                uint32_t invA = 255U - a;
+                px[i * 4 + 0] = static_cast<BYTE>((b * a + matteVal * invA + 127U) / 255U);
+                px[i * 4 + 1] = static_cast<BYTE>((g * a + matteVal * invA + 127U) / 255U);
+                px[i * 4 + 2] = static_cast<BYTE>((r * a + matteVal * invA + 127U) / 255U);
+                px[i * 4 + 3] = 255;
+            }
+        }
+    }
+
+    ComPtr<IWICBitmap> finalWicBmp;
+    if (FAILED(factory->CreateBitmapFromMemory(
+            targetW,
+            targetH,
+            GUID_WICPixelFormat32bppBGRA,
+            targetW * 4,
+            static_cast<UINT>(finalPixels.size() * sizeof(uint32_t)),
+            reinterpret_cast<BYTE*>(finalPixels.data()),
+            &finalWicBmp))) {
+        return false;
+    }
+
+    // 5. Create growable in-memory IStream
+    ComPtr<IStream> memStream;
+    if (FAILED(CreateStreamOnHGlobal(nullptr, TRUE, &memStream)) || !memStream) {
+        return false;
+    }
+
+    // 6. Initialize WIC Encoder & Frame
+    ComPtr<IWICBitmapEncoder> encoder;
+    if (FAILED(factory->CreateEncoder(fmtInfo.containerGuid, nullptr, &encoder)) || !encoder) {
+        return false;
+    }
+    if (FAILED(encoder->Initialize(memStream.Get(), WICBitmapEncoderNoCache))) {
+        return false;
+    }
+
+    ComPtr<IWICBitmapFrameEncode> frameEncode;
+    ComPtr<IPropertyBag2> propBag;
+    if (FAILED(encoder->CreateNewFrame(&frameEncode, &propBag)) || !frameEncode) {
+        return false;
+    }
+
+    // 7. Configure encoder properties
+    if (propBag) {
+        if (fmtInfo.supportsQuality) {
+            PROPBAG2 option = {};
+            option.pstrName = const_cast<LPOLESTR>(L"ImageQuality");
+            VARIANT varVal;
+            VariantInit(&varVal);
+            varVal.vt = VT_R4;
+            varVal.fltVal = static_cast<float>(std::clamp(params.quality, 1, 100)) / 100.0f;
+            propBag->Write(1, &option, &varVal);
+        } else if (params.format == ExportFormat::Tiff) {
+            PROPBAG2 option = {};
+            option.pstrName = const_cast<LPOLESTR>(L"TiffCompressionMethod");
+            VARIANT varVal;
+            VariantInit(&varVal);
+            varVal.vt = VT_UI1;
+            varVal.bVal = static_cast<BYTE>(WICTiffCompressionLZW);
+            propBag->Write(1, &option, &varVal);
+        }
+    }
+
+    if (FAILED(frameEncode->Initialize(propBag.Get()))) return false;
+    if (FAILED(frameEncode->SetSize(targetW, targetH))) return false;
+
+    // 8. Configure pixel format & palette and write frame
+    if (params.format == ExportFormat::Gif) {
+        WICPixelFormatGUID pf = GUID_WICPixelFormat8bppIndexed;
+        if (FAILED(frameEncode->SetPixelFormat(&pf))) return false;
+
+        ComPtr<IWICPalette> palette;
+        if (FAILED(factory->CreatePalette(&palette))) return false;
+        if (FAILED(palette->InitializeFromBitmap(finalWicBmp.Get(), 256, FALSE))) return false;
+        frameEncode->SetPalette(palette.Get());
+
+        ComPtr<IWICFormatConverter> conv;
+        if (FAILED(factory->CreateFormatConverter(&conv))) return false;
+        if (FAILED(conv->Initialize(
+                finalWicBmp.Get(),
+                pf,
+                WICBitmapDitherTypeErrorDiffusion,
+                palette.Get(),
+                0.0f,
+                WICBitmapPaletteTypeCustom))) {
+            return false;
+        }
+        if (FAILED(frameEncode->WriteSource(conv.Get(), nullptr))) return false;
+    } else {
+        WICPixelFormatGUID pf = (effectiveMatte == ExportMatte::KeepAlpha && fmtInfo.supportsAlpha)
+            ? GUID_WICPixelFormat32bppBGRA
+            : GUID_WICPixelFormat24bppBGR;
+        if (FAILED(frameEncode->SetPixelFormat(&pf))) return false;
+
+        ComPtr<IWICFormatConverter> conv;
+        if (FAILED(factory->CreateFormatConverter(&conv))) return false;
+        if (FAILED(conv->Initialize(
+                finalWicBmp.Get(),
+                pf,
+                WICBitmapDitherTypeNone,
+                nullptr,
+                0.0f,
+                WICBitmapPaletteTypeCustom))) {
+            return false;
+        }
+        if (FAILED(frameEncode->WriteSource(conv.Get(), nullptr))) return false;
+    }
+
+    // 9. Commit & extract encoded bytes
+    if (FAILED(frameEncode->Commit())) return false;
+    if (FAILED(encoder->Commit())) return false;
+
+    STATSTG stat = {};
+    if (FAILED(memStream->Stat(&stat, STATFLAG_NONAME)) || stat.cbSize.QuadPart == 0) {
+        return false;
+    }
+
+    HGLOBAL hGlobal = nullptr;
+    if (FAILED(GetHGlobalFromStream(memStream.Get(), &hGlobal)) || !hGlobal) {
+        return false;
+    }
+
+    const void* pData = GlobalLock(hGlobal);
+    if (!pData) return false;
+
+    outBytes.resize(static_cast<size_t>(stat.cbSize.QuadPart));
+    memcpy(outBytes.data(), pData, outBytes.size());
+    GlobalUnlock(hGlobal);
+
+    return true;
+}
+
+bool ImageEngine::WriteBytesToFileAtomic(const std::wstring& destPath, const std::vector<BYTE>& bytes) {
+    if (destPath.empty() || bytes.empty()) return false;
+    std::wstring tmpPath = destPath + L".lpv_tmp";
+
+    HANDLE hFile = CreateFileW(
+        tmpPath.c_str(),
+        GENERIC_WRITE,
+        0,
+        nullptr,
+        CREATE_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr
+    );
+    if (hFile == INVALID_HANDLE_VALUE) return false;
+
+    DWORD written = 0;
+    BOOL ok = WriteFile(hFile, bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr);
+    FlushFileBuffers(hFile);
+    CloseHandle(hFile);
+
+    if (!ok || written != static_cast<DWORD>(bytes.size())) {
+        DeleteFileW(tmpPath.c_str());
+        return false;
+    }
+
+    if (!MoveFileExW(tmpPath.c_str(), destPath.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        DeleteFileW(tmpPath.c_str());
+        return false;
+    }
+    return true;
+}

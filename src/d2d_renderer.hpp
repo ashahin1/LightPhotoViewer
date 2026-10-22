@@ -14,6 +14,7 @@ enum class HudButtonId {
     RotateCCW,
     RotateCW,
     Info,
+    Export,
     Delete
 };
 
@@ -107,6 +108,128 @@ struct PrintHitBox {
     D2D1_RECT_F rect;
 };
 
+enum class ExportScalePreset : int {
+    Scale100 = 0,
+    Scale75  = 1,
+    Scale50  = 2,
+    Scale25  = 3,
+    Custom   = 4
+};
+
+enum class ExportEditField : int {
+    None    = 0,
+    Quality = 1,
+    Width   = 2,
+    Height  = 3
+};
+
+struct ExportSettings {
+    bool isActive = false;
+    ExportFormat format = ExportFormat::Jpeg;
+    int quality = 92; // 1..100
+
+    ExportScalePreset scalePreset = ExportScalePreset::Scale100;
+    UINT baseWidth = 1;
+    UINT baseHeight = 1;
+    UINT targetWidth = 1;
+    UINT targetHeight = 1;
+    bool lockAspect = true;
+
+    bool bakeTransforms = true;
+    ExportMatte matte = ExportMatte::KeepAlpha;
+
+    // Multi-frame / GIF support
+    bool isAnimated = false;
+    size_t selectedFrameIdx = 0;
+    size_t totalFrameCount = 1;
+
+    // UI interactive states
+    bool isFormatDropdownOpen = false;
+    bool isDraggingQualitySlider = false;
+    ExportEditField activeEditField = ExportEditField::None;
+    std::wstring editBuffer;
+
+    // Live encoded buffer & exact byte size
+    std::vector<BYTE> encodedBytes;
+    bool encodeValid = false;
+
+    void ApplyScalePreset(ExportScalePreset preset) {
+        scalePreset = preset;
+        float factor = 1.0f;
+        if (preset == ExportScalePreset::Scale75) factor = 0.75f;
+        else if (preset == ExportScalePreset::Scale50) factor = 0.50f;
+        else if (preset == ExportScalePreset::Scale25) factor = 0.25f;
+        if (preset != ExportScalePreset::Custom) {
+            targetWidth  = std::max(1U, static_cast<UINT>(baseWidth * factor + 0.5f));
+            targetHeight = std::max(1U, static_cast<UINT>(baseHeight * factor + 0.5f));
+        }
+    }
+
+    void CommitEditField() {
+        if (activeEditField == ExportEditField::None) return;
+        if (!editBuffer.empty()) {
+            int val = _wtoi(editBuffer.c_str());
+            if (activeEditField == ExportEditField::Quality) {
+                quality = std::clamp(val, 1, 100);
+            } else if (activeEditField == ExportEditField::Width) {
+                targetWidth = static_cast<UINT>(std::clamp(val, 1, 8192));
+                scalePreset = ExportScalePreset::Custom;
+                if (lockAspect && baseWidth > 0) {
+                    targetHeight = std::max(1U, static_cast<UINT>((static_cast<double>(targetWidth) * baseHeight) / baseWidth + 0.5));
+                }
+            } else if (activeEditField == ExportEditField::Height) {
+                targetHeight = static_cast<UINT>(std::clamp(val, 1, 8192));
+                scalePreset = ExportScalePreset::Custom;
+                if (lockAspect && baseHeight > 0) {
+                    targetWidth = std::max(1U, static_cast<UINT>((static_cast<double>(targetHeight) * baseWidth) / baseHeight + 0.5));
+                }
+            }
+        }
+        activeEditField = ExportEditField::None;
+        editBuffer.clear();
+    }
+
+    void CancelEditField() {
+        activeEditField = ExportEditField::None;
+        editBuffer.clear();
+    }
+};
+
+enum class ExportUiId {
+    None,
+    CloseModal,
+    CardBody,
+    FormatDropdownBtn,
+    FormatDropdownItem,
+    FramePrev,
+    FrameNext,
+    QualityMinus,
+    QualitySliderTrack,
+    QualityInputBox,
+    QualityPlus,
+    Scale100,
+    Scale75,
+    Scale50,
+    Scale25,
+    ScaleCustom,
+    WidthInputBox,
+    AspectLockBtn,
+    HeightInputBox,
+    TransformBake,
+    TransformOriginal,
+    MatteKeepAlpha,
+    MatteWhite,
+    MatteBlack,
+    CancelBtn,
+    ExecuteExport
+};
+
+struct ExportHitBox {
+    ExportUiId id;
+    int itemIndex = -1;
+    D2D1_RECT_F rect;
+};
+
 struct HudButtonInfo {
     HudButtonId id;
     std::wstring label;
@@ -128,7 +251,7 @@ public:
 
     bool Initialize(HWND hWnd);
     void Resize(UINT width, UINT height);
-    void Render(TabManager& tabManager, float hudAlpha, bool showExif, bool showHelp, bool isSlideshow, const PrintSettings& printSettings, POINT mousePt);
+    void Render(TabManager& tabManager, float hudAlpha, bool showExif, bool showHelp, bool isSlideshow, const PrintSettings& printSettings, const ExportSettings& exportSettings, POINT mousePt);
 
     // Hit testing
     int HitTestTab(POINT pt, const TabManager& tabManager, bool& outCloseButton);
@@ -139,6 +262,9 @@ public:
     int HitTestRecentFile(POINT pt, std::wstring& outPath);
     PrintUiId HitTestPrintUi(POINT pt);
     int GetHitDropdownIndex() const { return m_hitDropdownIndex; }
+    ExportUiId HitTestExportUi(POINT pt);
+    int GetHitExportDropdownIndex() const { return m_hitExportDropdownIndex; }
+    D2D1_RECT_F GetExportQualitySliderRect() const { return m_exportSliderRect; }
 
     float GetDpiScale() const { return m_dpiScale; }
     void UpdateDpi(float dpi);
@@ -201,6 +327,12 @@ private:
     D2D1_RECT_F m_dropdownListRect = { 0, 0, 0, 0 };
     int m_hitDropdownIndex = -1;
 
+    std::vector<ExportHitBox> m_exportHits;
+    D2D1_RECT_F m_exportCardRect = { 0, 0, 0, 0 };
+    D2D1_RECT_F m_exportCloseRect = { 0, 0, 0, 0 };
+    D2D1_RECT_F m_exportSliderRect = { 0, 0, 0, 0 };
+    int m_hitExportDropdownIndex = -1;
+
     bool CreateDeviceIndependentResources();
     bool CreateDeviceResources();
     void DiscardDeviceResources();
@@ -212,6 +344,7 @@ private:
     void RenderExifOverlay(TabItem* tab);
     void RenderHelpOverlay(POINT mousePt);
     void RenderPrintPreview(TabItem* activeTab, const PrintSettings& settings, POINT mousePt);
+    void RenderExportModal(TabItem* activeTab, const ExportSettings& settings, POINT mousePt);
     void RenderEmptyState(const TabManager& tabManager, POINT mousePt);
     void RenderSlideshowBadge();
     void DrawCheckerboard(D2D1_RECT_F rect);
