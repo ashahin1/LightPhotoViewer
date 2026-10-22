@@ -7,7 +7,7 @@
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://isocpp.org/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-0078D6.svg)](https://www.microsoft.com/windows)
 [![Release](https://img.shields.io/github/v/release/ashahin1/LightPhotoViewer?color=blue)](https://github.com/ashahin1/LightPhotoViewer/releases)
-[![Binary Size](https://img.shields.io/badge/Binary%20Size-477%20KB-brightgreen.svg)]()
+[![Binary Size](https://img.shields.io/badge/Binary%20Size-483%20KB-brightgreen.svg)]()
 [![Private RAM](https://img.shields.io/badge/Private%20RAM-35--55%20MB-success.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -24,7 +24,7 @@ Measured on Windows 11 (64-bit) with cold execution and hardware performance cou
 
 | Metric | LightPhotoViewer | Windows Photos | ImageGlass | IrfanView |
 | :--- | :---: | :---: | :---: | :---: |
-| **Standalone Binary Size** | **477 KB** | ~150 MB | ~65 MB | ~3 MB |
+| **Standalone Binary Size** | **483 KB** | ~150 MB | ~65 MB | ~3 MB |
 | **External Runtime DLLs** | **0** (Native OS only) | 40+ | 30+ | 0–10 |
 | **Cold Startup Latency** | **~220 ms** | ~1,800 ms | ~900 ms | ~120 ms |
 | **Private RAM (4K Image)** | **~35–55 MB** | ~180 MB | ~110 MB | ~40 MB |
@@ -73,7 +73,7 @@ Measured on Windows 11 (64-bit) with cold execution and hardware performance cou
 * **Single-Instance Tab Forwarding**: Double-clicking files in Windows Explorer forwards them into tabs of the running window via `WM_COPYDATA`.
 * **Dynamic Floating HUD Toolbar**: Auto-fading toolbar awakens on mouse movement with a dual-purpose zoom badge and state-aware **`Fit` $\leftrightarrow$ `1:1`** toggle button.
 * **Automated Slideshow Mode**: Press **`F5`** or **`S`** to cycle images automatically every 3 seconds.
-* **Recent Files (MRU List)**: Displays persistent recent files on empty state with keyboard shortcuts `1`–`6` and direct click opening.
+* **Recent Files & In-Canvas Quick-Picker (`Ctrl+R`)**: Displays persistent recent files on empty state with single-line path compaction, or press **`Ctrl+R`** (or **`Ctrl+H`**) anytime to summon the in-canvas Recent Documents modal over an active image with `1`–`9` hotkeys, arrow navigation, and instant switching.
 * **System-Aware Theme Synchronization**: Native Windows 11/10 dark mode integration via `uxtheme.dll` dynamically matches DWM title bars and context menus with system preferences.
 
 ---
@@ -201,6 +201,7 @@ LightPhotoViewer.exe /unregister /silent
 | Shortcut | Action |
 | :--- | :--- |
 | `Ctrl + O` | Open image file dialog (multi-select supported) |
+| `Ctrl + R` / `Ctrl + H` | Open Recent Documents modal |
 | `Ctrl + S` | Open Export / Convert Image modal (or save when modal is open) |
 | `Ctrl + P` | Open Print Preview / Execute print job |
 | `[` / `]` | Previous / Next animation frame (in Export Modal & Print Preview) |
@@ -208,7 +209,7 @@ LightPhotoViewer.exe /unregister /silent
 | `Ctrl + Shift + T` | Reopen recently closed tab |
 | `Ctrl + Tab` | Next tab |
 | `Ctrl + Shift + Tab` | Previous tab |
-| `1` – `6` | Open recent file from empty state |
+| `1` – `9` | Open recent file from empty state or inside Recent Documents modal |
 | `Esc` | Close modal / overlay, exit slideshow, or exit fullscreen |
 
 ---

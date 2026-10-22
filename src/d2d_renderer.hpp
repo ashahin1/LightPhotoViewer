@@ -244,6 +244,11 @@ struct RecentFileHitBox {
     bool isHovered;
 };
 
+struct RecentModalState {
+    bool isActive = false;
+    int selectedIndex = -1;
+};
+
 class D2DRenderer {
 public:
     D2DRenderer();
@@ -251,7 +256,7 @@ public:
 
     bool Initialize(HWND hWnd);
     void Resize(UINT width, UINT height);
-    void Render(TabManager& tabManager, float hudAlpha, bool showExif, bool showHelp, bool isSlideshow, const PrintSettings& printSettings, const ExportSettings& exportSettings, POINT mousePt);
+    void Render(TabManager& tabManager, float hudAlpha, bool showExif, bool showHelp, bool isSlideshow, const PrintSettings& printSettings, const ExportSettings& exportSettings, const RecentModalState& recentModalState, POINT mousePt);
 
     // Hit testing
     int HitTestTab(POINT pt, const TabManager& tabManager, bool& outCloseButton);
@@ -259,6 +264,8 @@ public:
     HudButtonId HitTestHud(POINT pt);
     bool HitTestHelpClose(POINT pt);
     bool HitTestHelpCard(POINT pt);
+    bool HitTestRecentModalClose(POINT pt);
+    bool HitTestRecentModalCard(POINT pt);
     int HitTestRecentFile(POINT pt, std::wstring& outPath);
     PrintUiId HitTestPrintUi(POINT pt);
     int GetHitDropdownIndex() const { return m_hitDropdownIndex; }
@@ -305,6 +312,8 @@ private:
     ComPtr<IDWriteTextFormat> m_formatHelpCat;
     ComPtr<IDWriteTextFormat> m_formatKeycap;
     ComPtr<IDWriteTextFormat> m_formatKeyDesc;
+    ComPtr<IDWriteTextFormat> m_formatRecentPath;
+    ComPtr<IDWriteInlineObject> m_trimmingEllipsis;
 
     // Brushes
     ComPtr<ID2D1SolidColorBrush> m_brushBg;
@@ -333,6 +342,9 @@ private:
     D2D1_RECT_F m_exportSliderRect = { 0, 0, 0, 0 };
     int m_hitExportDropdownIndex = -1;
 
+    D2D1_RECT_F m_recentCardRect = { 0, 0, 0, 0 };
+    D2D1_RECT_F m_recentCloseRect = { 0, 0, 0, 0 };
+
     bool CreateDeviceIndependentResources();
     bool CreateDeviceResources();
     void DiscardDeviceResources();
@@ -345,6 +357,7 @@ private:
     void RenderHelpOverlay(POINT mousePt);
     void RenderPrintPreview(TabItem* activeTab, const PrintSettings& settings, POINT mousePt);
     void RenderExportModal(TabItem* activeTab, const ExportSettings& settings, POINT mousePt);
+    void RenderRecentModal(const TabManager& tabManager, const RecentModalState& state, POINT mousePt);
     void RenderEmptyState(const TabManager& tabManager, POINT mousePt);
     void RenderSlideshowBadge();
     void DrawCheckerboard(D2D1_RECT_F rect);

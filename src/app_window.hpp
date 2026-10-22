@@ -46,6 +46,9 @@ private:
     // Image Export & Conversion Modal
     ExportSettings m_exportSettings;
 
+    // Recent Documents Modal
+    RecentModalState m_recentModalState;
+
     void Invalidate();
     void UpdateWindowTitle();
     void ToggleFullscreen();
@@ -73,6 +76,10 @@ private:
     void UpdateExportEstimate();
     void HandleExportUiClick(ExportUiId id);
     void ExecuteExportSaveDialog();
+
+    void OpenRecentModal();
+    void CloseRecentModal();
+    void ToggleRecentModal();
 
     void NextImage();
     void PrevImage();

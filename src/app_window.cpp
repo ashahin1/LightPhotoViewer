@@ -378,6 +378,7 @@ void AppWindow::ShowContextMenu(int x, int y) {
     bool hasDoc = (tab && tab->document && tab->document->isValid);
 
     AppendMenuW(hMenu, MF_STRING, IDM_FILE_OPEN, L"Open Image...\tCtrl+O");
+    AppendMenuW(hMenu, MF_STRING, IDM_FILE_RECENT, L"Recent Images...\tCtrl+R");
     AppendMenuW(hMenu, MF_STRING, IDM_FILE_REOPEN_TAB, L"Reopen Closed Tab\tCtrl+Shift+T");
     if (hasDoc) {
         AppendMenuW(hMenu, MF_STRING, IDM_FILE_EXPORT, L"Export / Convert Image...\tCtrl+S");
@@ -431,6 +432,11 @@ void AppWindow::ShowContextMenu(int x, int y) {
 
 void AppWindow::ToggleHelp() {
     m_showHelp = !m_showHelp;
+    if (m_showHelp) {
+        m_printSettings.isActive = false;
+        m_exportSettings.isActive = false;
+        m_recentModalState.isActive = false;
+    }
     Invalidate();
 }
 
@@ -622,7 +628,7 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         case WM_PAINT: {
             PAINTSTRUCT ps;
             BeginPaint(m_hWnd, &ps);
-            m_renderer.Render(m_tabManager, m_hudAlpha, m_showExif, m_showHelp, m_isSlideshow, m_printSettings, m_exportSettings, m_mousePt);
+            m_renderer.Render(m_tabManager, m_hudAlpha, m_showExif, m_showHelp, m_isSlideshow, m_printSettings, m_exportSettings, m_recentModalState, m_mousePt);
             EndPaint(m_hWnd, &ps);
             return 0;
         }
@@ -674,6 +680,23 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
 
         case WM_LBUTTONDOWN: {
             POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+
+            // If Recent Documents modal is active, handle item click, close button, or backdrop dismiss
+            if (m_recentModalState.isActive) {
+                if (m_renderer.HitTestRecentModalClose(pt) || !m_renderer.HitTestRecentModalCard(pt)) {
+                    CloseRecentModal();
+                    return 0;
+                }
+                std::wstring hitPath;
+                if (m_renderer.HitTestRecentFile(pt, hitPath) >= 0) {
+                    m_tabManager.OpenTab(hitPath);
+                    CloseRecentModal();
+                    UpdateWindowTitle();
+                    Invalidate();
+                    return 0;
+                }
+                return 0;
+            }
 
             // If Export Modal is active, handle overlay controls or backdrop click
             if (m_exportSettings.isActive) {
@@ -957,6 +980,62 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
             bool ctrlDown = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
             bool shiftDown = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
 
+            // 0. Strict Modal Isolation: Recent Documents Modal
+            if (m_recentModalState.isActive) {
+                if (wParam == VK_ESCAPE) {
+                    CloseRecentModal();
+                    return 0;
+                }
+                const auto& recents = m_tabManager.GetRecentFiles();
+                int count = static_cast<int>(std::min(recents.size(), static_cast<size_t>(9)));
+
+                if ((wParam >= '1' && wParam <= '9') || (wParam >= VK_NUMPAD1 && wParam <= VK_NUMPAD9)) {
+                    int idx = (wParam >= '1' && wParam <= '9')
+                        ? static_cast<int>(wParam - '1')
+                        : static_cast<int>(wParam - VK_NUMPAD1);
+                    if (idx >= 0 && idx < count) {
+                        m_tabManager.OpenTab(recents[idx]);
+                        CloseRecentModal();
+                        UpdateWindowTitle();
+                        Invalidate();
+                        return 0;
+                    }
+                }
+                if (wParam == VK_UP) {
+                    if (count > 0) {
+                        if (m_recentModalState.selectedIndex <= 0) {
+                            m_recentModalState.selectedIndex = count - 1;
+                        } else {
+                            m_recentModalState.selectedIndex--;
+                        }
+                        Invalidate();
+                    }
+                    return 0;
+                }
+                if (wParam == VK_DOWN) {
+                    if (count > 0) {
+                        if (m_recentModalState.selectedIndex < 0 || m_recentModalState.selectedIndex >= count - 1) {
+                            m_recentModalState.selectedIndex = 0;
+                        } else {
+                            m_recentModalState.selectedIndex++;
+                        }
+                        Invalidate();
+                    }
+                    return 0;
+                }
+                if (wParam == VK_RETURN) {
+                    if (m_recentModalState.selectedIndex >= 0 && m_recentModalState.selectedIndex < count) {
+                        m_tabManager.OpenTab(recents[m_recentModalState.selectedIndex]);
+                        CloseRecentModal();
+                        UpdateWindowTitle();
+                        Invalidate();
+                        return 0;
+                    }
+                }
+                // Strictly suppress all other keys while Recent Modal is open
+                return 0;
+            }
+
             // 1. Strict Modal Isolation: Export & Convert Modal
             if (m_exportSettings.isActive) {
                 const auto& formats = ImageEngine::GetExportFormats();
@@ -1216,6 +1295,11 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
             if (ctrlDown) {
                 switch (wParam) {
                     case 'O': OpenFileDialog(); return 0;
+                    case 'R':
+                    case 'H': {
+                        ToggleRecentModal();
+                        return 0;
+                    }
                     case 'S': {
                         if (m_exportSettings.isActive) ExecuteExportSaveDialog();
                         else OpenExportModal();
@@ -1429,6 +1513,10 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
                     return 0;
 
                 case VK_ESCAPE:
+                    if (m_recentModalState.isActive) {
+                        CloseRecentModal();
+                        return 0;
+                    }
                     if (m_printSettings.isActive) {
                         ClosePrintPreview();
                         return 0;
@@ -1453,6 +1541,7 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         case WM_COMMAND: {
             switch (LOWORD(wParam)) {
                 case IDM_FILE_OPEN:       OpenFileDialog(); return 0;
+                case IDM_FILE_RECENT:     ToggleRecentModal(); return 0;
                 case IDM_FILE_REOPEN_TAB: ReopenClosedTab(); return 0;
                 case IDM_FILE_EXPORT:     OpenExportModal(); return 0;
                 case IDM_FILE_PRINT:      OpenPrintPreview(); return 0;
@@ -1557,7 +1646,7 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
 
                 // 1. GIF Frame Animation update
                 TabItem* tab = m_tabManager.GetActiveTab();
-                if (!m_printSettings.isActive && !m_exportSettings.isActive && tab && tab->document && tab->document->metadata.isAnimated) {
+                if (!m_printSettings.isActive && !m_exportSettings.isActive && !m_recentModalState.isActive && tab && tab->document && tab->document->metadata.isAnimated) {
                     size_t frameCount = tab->document->GetFrameCount();
                     if (frameCount > 1) {
                         ULONGLONG now = GetTickCount64();
@@ -1805,6 +1894,8 @@ void AppWindow::OpenPrintPreview() {
     m_printSettings.copiesEditBuffer.clear();
     m_printSettings.isActive = true;
     m_showHelp = false;
+    m_exportSettings.isActive = false;
+    m_recentModalState.isActive = false;
     Invalidate();
 }
 
@@ -2177,6 +2268,7 @@ void AppWindow::OpenExportModal() {
     // Close other modals if active
     m_printSettings.isActive = false;
     m_showHelp = false;
+    m_recentModalState.isActive = false;
 
     UINT srcW = std::max(1U, tab->document->GetWidth());
     UINT srcH = std::max(1U, tab->document->GetHeight());
@@ -2529,5 +2621,29 @@ void AppWindow::ExecuteExportSaveDialog() {
                 MB_OK | MB_ICONERROR
             );
         }
+    }
+}
+
+void AppWindow::OpenRecentModal() {
+    m_printSettings.isActive = false;
+    m_exportSettings.isActive = false;
+    m_showHelp = false;
+
+    m_recentModalState.isActive = true;
+    m_recentModalState.selectedIndex = -1;
+    Invalidate();
+}
+
+void AppWindow::CloseRecentModal() {
+    m_recentModalState.isActive = false;
+    m_recentModalState.selectedIndex = -1;
+    Invalidate();
+}
+
+void AppWindow::ToggleRecentModal() {
+    if (m_recentModalState.isActive) {
+        CloseRecentModal();
+    } else {
+        OpenRecentModal();
     }
 }
