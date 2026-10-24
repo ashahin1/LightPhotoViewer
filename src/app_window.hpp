@@ -16,6 +16,7 @@ public:
     static void UnregisterShellAssociations();
     static void InitializeDarkMode();
     static bool IsSystemDarkMode();
+    static HMENU BuildTabContextMenu(const TabManager& tabManager, size_t targetTabIndex);
 
 private:
     static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -59,6 +60,8 @@ private:
     void OpenFileDialog();
     void DeleteCurrentFile();
     void ShowContextMenu(int x, int y);
+    void ShowTabContextMenu(size_t targetTabIndex, int x, int y);
+    void CopyTextToClipboard(const std::wstring& text);
     void HandleHudAction(HudButtonId id);
 
     // System Theme Management

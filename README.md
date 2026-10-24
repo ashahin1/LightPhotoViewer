@@ -7,7 +7,7 @@
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://isocpp.org/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-0078D6.svg)](https://www.microsoft.com/windows)
 [![Release](https://img.shields.io/github/v/release/ashahin1/LightPhotoViewer?color=blue)](https://github.com/ashahin1/LightPhotoViewer/releases)
-[![Binary Size](https://img.shields.io/badge/Binary%20Size-484%20KB-brightgreen.svg)]()
+[![Binary Size](https://img.shields.io/badge/Binary%20Size-499%20KB-brightgreen.svg)]()
 [![Private RAM](https://img.shields.io/badge/Private%20RAM-35--55%20MB-success.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -24,7 +24,7 @@ Measured on Windows 11 (64-bit) with cold execution and hardware performance cou
 
 | Metric | LightPhotoViewer | Windows Photos | ImageGlass | IrfanView |
 | :--- | :---: | :---: | :---: | :---: |
-| **Standalone Binary Size** | **484 KB** | ~150 MB | ~65 MB | ~3 MB |
+| **Standalone Binary Size** | **499.5 KB** | ~150 MB | ~65 MB | ~3 MB |
 | **External Runtime DLLs** | **0** (Native OS only) | 40+ | 30+ | 0–10 |
 | **Cold Startup Latency** | **~220 ms** | ~1,800 ms | ~900 ms | ~120 ms |
 | **Private RAM (4K Image)** | **~35–55 MB** | ~180 MB | ~110 MB | ~40 MB |
@@ -69,7 +69,7 @@ Measured on Windows 11 (64-bit) with cold execution and hardware performance cou
 * **Direct High-Resolution Spooling**: Native Win32 GDI print spooler with transparent backgrounds cleanly composited over white and vector SVGs rasterized through Direct2D offscreen GPU buffers.
 
 ### 🗂️ Minimalist Window & Tab Workflow
-* **Smart Auto-Hiding Multi-Tabs**: When 1 image is open, the tab strip automatically hides for a clean view; when 2+ images are open, an interactive tab bar appears. Close tabs with `Ctrl+W` or middle-click, and reopen closed tabs with `Ctrl+Shift+T`.
+* **Smart Auto-Hiding Multi-Tabs & Native Tab Context Menu**: When 1 image is open, the tab strip automatically hides for a clean view; when 2+ images are open, an interactive tab bar appears. Close tabs with `Ctrl+W` or middle-click, and reopen closed tabs with `Ctrl+Shift+T`. Right-click any tab header for context-sensitive tab actions: **Close Tab**, **Close Other Tabs**, **Close Tabs to the Right**, **Reopen Closed Tab**, **Copy File Path**, and **Open Containing Folder** (matching Chrome/Edge/VS Code UX patterns with state preservation).
 * **Single-Instance Tab Forwarding**: Double-clicking files in Windows Explorer forwards them into tabs of the running window via `WM_COPYDATA`.
 * **Dynamic Floating HUD Toolbar**: Auto-fading toolbar awakens on mouse movement with a dual-purpose zoom badge and state-aware **`Fit` $\leftrightarrow$ `1:1`** toggle button.
 * **Automated Slideshow Mode**: Press **`F5`** or **`S`** to cycle images automatically every 3 seconds.

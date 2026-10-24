@@ -102,14 +102,40 @@ bool TabManager::OpenTab(const std::wstring& filePath) {
     return true;
 }
 
-bool TabManager::CloseTab(size_t index) {
+void TabManager::RecordClosedTab(const TabItem* tab) {
+    if (!tab) return;
+    std::wstring path;
+    if (tab->document && !tab->document->metadata.filePath.empty()) {
+        path = tab->document->metadata.filePath;
+    } else if (tab->navigator) {
+        path = tab->navigator->GetCurrentFilePath();
+    }
+    if (path.empty()) return;
+
+    ClosedTabState state;
+    state.filePath = path;
+    state.frameIndex = tab->currentFrame;
+    state.zoom = tab->zoom;
+    state.panX = tab->panX;
+    state.panY = tab->panY;
+    state.isFitToWindow = tab->isFitToWindow;
+    state.rotationDegrees = tab->rotationDegrees;
+    state.flipH = tab->flipH;
+    state.flipV = tab->flipV;
+
+    m_closedTabs.push_front(std::move(state));
+    if (m_closedTabs.size() > 20) {
+        m_closedTabs.pop_back();
+    }
+}
+
+bool TabManager::CloseTab(size_t index, TabClosingCallback callback) {
     if (index >= m_tabs.size()) return false;
 
-    if (m_tabs[index]->navigator) {
-        std::wstring closedPath = m_tabs[index]->navigator->GetCurrentFilePath();
-        if (!closedPath.empty()) {
-            m_closedTabs.push_front(closedPath);
-            if (m_closedTabs.size() > 20) m_closedTabs.pop_back();
+    if (m_tabs[index]) {
+        RecordClosedTab(m_tabs[index].get());
+        if (callback) {
+            callback(m_tabs[index].get());
         }
     }
 
@@ -117,18 +143,74 @@ bool TabManager::CloseTab(size_t index) {
 
     if (m_tabs.empty()) {
         m_activeIndex = -1;
+    } else if (static_cast<int>(index) < m_activeIndex) {
+        --m_activeIndex;
     } else if (m_activeIndex >= static_cast<int>(m_tabs.size())) {
         m_activeIndex = static_cast<int>(m_tabs.size()) - 1;
     }
     return true;
 }
 
+bool TabManager::CloseOtherTabs(size_t keepIndex, TabClosingCallback callback) {
+    if (keepIndex >= m_tabs.size() || m_tabs.size() <= 1) return false;
+
+    auto keptTab = std::move(m_tabs[keepIndex]);
+
+    for (size_t i = 0; i < m_tabs.size(); ++i) {
+        if (i == keepIndex) continue;
+        if (m_tabs[i]) {
+            RecordClosedTab(m_tabs[i].get());
+            if (callback) {
+                callback(m_tabs[i].get());
+            }
+        }
+    }
+
+    m_tabs.clear();
+    m_tabs.push_back(std::move(keptTab));
+    m_activeIndex = 0;
+    return true;
+}
+
+bool TabManager::CloseTabsToTheRight(size_t index, TabClosingCallback callback) {
+    if (index + 1 >= m_tabs.size()) return false;
+
+    for (size_t i = index + 1; i < m_tabs.size(); ++i) {
+        if (m_tabs[i]) {
+            RecordClosedTab(m_tabs[i].get());
+            if (callback) {
+                callback(m_tabs[i].get());
+            }
+        }
+    }
+
+    m_tabs.erase(m_tabs.begin() + (index + 1), m_tabs.end());
+
+    if (m_activeIndex > static_cast<int>(index)) {
+        m_activeIndex = static_cast<int>(index);
+    }
+    return true;
+}
+
 bool TabManager::ReopenClosedTab() {
     while (!m_closedTabs.empty()) {
-        std::wstring path = m_closedTabs.front();
+        ClosedTabState state = std::move(m_closedTabs.front());
         m_closedTabs.pop_front();
-        if (std::filesystem::exists(path)) {
-            return OpenTab(path);
+        if (std::filesystem::exists(state.filePath)) {
+            if (OpenTab(state.filePath)) {
+                TabItem* tab = GetActiveTab();
+                if (tab) {
+                    tab->zoom = state.zoom;
+                    tab->panX = state.panX;
+                    tab->panY = state.panY;
+                    tab->isFitToWindow = state.isFitToWindow;
+                    tab->rotationDegrees = state.rotationDegrees;
+                    tab->flipH = state.flipH;
+                    tab->flipV = state.flipV;
+                    tab->currentFrame = state.frameIndex;
+                }
+                return true;
+            }
         }
     }
     return false;
@@ -162,6 +244,13 @@ TabItem* TabManager::GetActiveTab() {
 }
 
 const TabItem* TabManager::GetTab(size_t index) const {
+    if (index < m_tabs.size()) {
+        return m_tabs[index].get();
+    }
+    return nullptr;
+}
+
+TabItem* TabManager::GetTab(size_t index) {
     if (index < m_tabs.size()) {
         return m_tabs[index].get();
     }

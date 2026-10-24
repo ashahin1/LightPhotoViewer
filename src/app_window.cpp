@@ -366,7 +366,147 @@ void AppWindow::DeleteCurrentFile() {
     }
 }
 
+void AppWindow::CopyTextToClipboard(const std::wstring& text) {
+    if (text.empty()) return;
+    if (OpenClipboard(m_hWnd)) {
+        EmptyClipboard();
+        size_t bytes = (text.length() + 1) * sizeof(wchar_t);
+        HGLOBAL hMem = GlobalAlloc(GHND, bytes);
+        if (hMem) {
+            void* pMem = GlobalLock(hMem);
+            if (pMem) {
+                memcpy(pMem, text.c_str(), bytes);
+                GlobalUnlock(hMem);
+                SetClipboardData(CF_UNICODETEXT, hMem);
+            } else {
+                GlobalFree(hMem);
+            }
+        }
+        CloseClipboard();
+    }
+}
+
+HMENU AppWindow::BuildTabContextMenu(const TabManager& tabManager, size_t targetTabIndex) {
+    if (targetTabIndex >= tabManager.GetTabCount()) return nullptr;
+
+    HMENU hMenu = CreatePopupMenu();
+    if (!hMenu) return nullptr;
+
+    size_t totalTabs = tabManager.GetTabCount();
+    const TabItem* targetTab = tabManager.GetTab(targetTabIndex);
+    std::wstring targetPath;
+    if (targetTab && targetTab->document && !targetTab->document->metadata.filePath.empty()) {
+        targetPath = targetTab->document->metadata.filePath;
+    } else if (targetTab && targetTab->navigator) {
+        targetPath = targetTab->navigator->GetCurrentFilePath();
+    }
+    bool hasFile = !targetPath.empty();
+
+    // 1. Close Tab (\tCtrl+W)
+    AppendMenuW(hMenu, MF_STRING | MF_ENABLED, IDM_TAB_CLOSE, L"Close Tab\tCtrl+W");
+
+    // 2. Close Other Tabs (disabled if only 1 tab is currently open)
+    UINT flagsOthers = (totalTabs > 1) ? (MF_STRING | MF_ENABLED) : (MF_STRING | MF_GRAYED);
+    AppendMenuW(hMenu, flagsOthers, IDM_TAB_CLOSE_OTHERS, L"Close Other Tabs");
+
+    // 3. Close Tabs to the Right (disabled if target tab is already the right-most tab)
+    UINT flagsRight = (targetTabIndex + 1 < totalTabs) ? (MF_STRING | MF_ENABLED) : (MF_STRING | MF_GRAYED);
+    AppendMenuW(hMenu, flagsRight, IDM_TAB_CLOSE_RIGHT, L"Close Tabs to the Right");
+
+    // 4. Separator
+    AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
+
+    // 5. Reopen Closed Tab (\tCtrl+Shift+T) (disabled if closed-tab stack is empty)
+    UINT flagsReopen = tabManager.CanReopenClosedTab() ? (MF_STRING | MF_ENABLED) : (MF_STRING | MF_GRAYED);
+    AppendMenuW(hMenu, flagsReopen, IDM_TAB_REOPEN, L"Reopen Closed Tab\tCtrl+Shift+T");
+
+    // 6. Separator
+    AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
+
+    // 7. Copy File Path (disabled if tab has no associated file)
+    UINT flagsCopy = hasFile ? (MF_STRING | MF_ENABLED) : (MF_STRING | MF_GRAYED);
+    AppendMenuW(hMenu, flagsCopy, IDM_TAB_COPY_PATH, L"Copy File Path");
+
+    // 8. Open Containing Folder (disabled if tab has no associated file)
+    UINT flagsFolder = hasFile ? (MF_STRING | MF_ENABLED) : (MF_STRING | MF_GRAYED);
+    AppendMenuW(hMenu, flagsFolder, IDM_TAB_OPEN_FOLDER, L"Open Containing Folder");
+
+    return hMenu;
+}
+
+void AppWindow::ShowTabContextMenu(size_t targetTabIndex, int x, int y) {
+    if (targetTabIndex >= m_tabManager.GetTabCount()) return;
+
+    if (s_fnSetPreferredAppMode) {
+        s_fnSetPreferredAppMode(IsSystemDarkMode() ? PreferredAppMode::ForceDark : PreferredAppMode::ForceLight);
+    }
+    if (s_fnFlushMenuThemes) {
+        s_fnFlushMenuThemes();
+    }
+
+    HMENU hMenu = BuildTabContextMenu(m_tabManager, targetTabIndex);
+    if (!hMenu) return;
+
+    SetForegroundWindow(m_hWnd);
+
+    UINT cmd = TrackPopupMenuEx(hMenu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY, x, y, m_hWnd, nullptr);
+    DestroyMenu(hMenu);
+
+    if (cmd == 0) return;
+
+    const TabItem* targetTab = m_tabManager.GetTab(targetTabIndex);
+    std::wstring targetPath;
+    if (targetTab && targetTab->document && !targetTab->document->metadata.filePath.empty()) {
+        targetPath = targetTab->document->metadata.filePath;
+    } else if (targetTab && targetTab->navigator) {
+        targetPath = targetTab->navigator->GetCurrentFilePath();
+    }
+
+    switch (cmd) {
+        case IDM_TAB_CLOSE: {
+            m_tabManager.CloseTab(targetTabIndex);
+            UpdateWindowTitle();
+            Invalidate();
+            break;
+        }
+        case IDM_TAB_CLOSE_OTHERS: {
+            m_tabManager.CloseOtherTabs(targetTabIndex);
+            UpdateWindowTitle();
+            Invalidate();
+            break;
+        }
+        case IDM_TAB_CLOSE_RIGHT: {
+            m_tabManager.CloseTabsToTheRight(targetTabIndex);
+            UpdateWindowTitle();
+            Invalidate();
+            break;
+        }
+        case IDM_TAB_REOPEN: {
+            m_tabManager.ReopenClosedTab();
+            UpdateWindowTitle();
+            Invalidate();
+            break;
+        }
+        case IDM_TAB_COPY_PATH: {
+            if (!targetPath.empty()) {
+                CopyTextToClipboard(targetPath);
+            }
+            break;
+        }
+        case IDM_TAB_OPEN_FOLDER: {
+            if (!targetPath.empty()) {
+                std::wstring param = L"/select,\"" + targetPath + L"\"";
+                ShellExecuteW(nullptr, L"open", L"explorer.exe", param.c_str(), nullptr, SW_SHOWNORMAL);
+            }
+            break;
+        }
+    }
+}
+
 void AppWindow::ShowContextMenu(int x, int y) {
+    if (s_fnSetPreferredAppMode) {
+        s_fnSetPreferredAppMode(IsSystemDarkMode() ? PreferredAppMode::ForceDark : PreferredAppMode::ForceLight);
+    }
     if (s_fnFlushMenuThemes) {
         s_fnFlushMenuThemes();
     }
@@ -379,7 +519,9 @@ void AppWindow::ShowContextMenu(int x, int y) {
 
     AppendMenuW(hMenu, MF_STRING, IDM_FILE_OPEN, L"Open Image...\tCtrl+O");
     AppendMenuW(hMenu, MF_STRING, IDM_FILE_RECENT, L"Recent Images...\tCtrl+R");
-    AppendMenuW(hMenu, MF_STRING, IDM_FILE_REOPEN_TAB, L"Reopen Closed Tab\tCtrl+Shift+T");
+
+    UINT flagsReopen = m_tabManager.CanReopenClosedTab() ? (MF_STRING | MF_ENABLED) : (MF_STRING | MF_GRAYED);
+    AppendMenuW(hMenu, flagsReopen, IDM_FILE_REOPEN_TAB, L"Reopen Closed Tab\tCtrl+Shift+T");
     if (hasDoc) {
         AppendMenuW(hMenu, MF_STRING, IDM_FILE_EXPORT, L"Export / Convert Image...\tCtrl+S");
         AppendMenuW(hMenu, MF_STRING, IDM_FILE_PRINT, L"Print...\tCtrl+P");
@@ -426,6 +568,7 @@ void AppWindow::ShowContextMenu(int x, int y) {
         AppendMenuW(hMenu, MF_STRING, IDM_FILE_CLOSE_TAB, L"Close Tab\tCtrl+W");
     }
 
+    SetForegroundWindow(m_hWnd);
     TrackPopupMenuEx(hMenu, TPM_RIGHTBUTTON, x, y, m_hWnd, nullptr);
     DestroyMenu(hMenu);
 }
@@ -949,7 +1092,39 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
             POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
             POINT screenPt = pt;
             ClientToScreen(m_hWnd, &screenPt);
+
+            bool isCloseBtn = false;
+            int hitTab = m_renderer.HitTestTab(pt, m_tabManager, isCloseBtn);
+            if (hitTab >= 0) {
+                ShowTabContextMenu(static_cast<size_t>(hitTab), screenPt.x, screenPt.y);
+                return 0;
+            }
+
             ShowContextMenu(screenPt.x, screenPt.y);
+            return 0;
+        }
+
+        case WM_CONTEXTMENU: {
+            int x = GET_X_LPARAM(lParam);
+            int y = GET_Y_LPARAM(lParam);
+            if (x == -1 && y == -1) {
+                RECT rc = {};
+                GetClientRect(m_hWnd, &rc);
+                POINT pt = { (rc.right - rc.left) / 2, (rc.bottom - rc.top) / 2 };
+                ClientToScreen(m_hWnd, &pt);
+                ShowContextMenu(pt.x, pt.y);
+            } else {
+                POINT screenPt = { x, y };
+                POINT clientPt = screenPt;
+                ScreenToClient(m_hWnd, &clientPt);
+                bool isCloseBtn = false;
+                int hitTab = m_renderer.HitTestTab(clientPt, m_tabManager, isCloseBtn);
+                if (hitTab >= 0) {
+                    ShowTabContextMenu(static_cast<size_t>(hitTab), screenPt.x, screenPt.y);
+                } else {
+                    ShowContextMenu(screenPt.x, screenPt.y);
+                }
+            }
             return 0;
         }
 
@@ -1332,18 +1507,7 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
                             if (fd) {
                                 if (shiftDown) {
                                     // Copy file path to clipboard
-                                    std::wstring path = tab->document->metadata.filePath;
-                                    if (OpenClipboard(m_hWnd)) {
-                                        EmptyClipboard();
-                                        size_t bytes = (path.length() + 1) * sizeof(wchar_t);
-                                        HGLOBAL hMem = GlobalAlloc(GHND, bytes);
-                                        if (hMem) {
-                                            memcpy(GlobalLock(hMem), path.c_str(), bytes);
-                                            GlobalUnlock(hMem);
-                                            SetClipboardData(CF_UNICODETEXT, hMem);
-                                        }
-                                        CloseClipboard();
-                                    }
+                                    CopyTextToClipboard(tab->document->metadata.filePath);
                                 } else {
                                     ImageEngine::Instance().CopyToClipboard(m_hWnd, *fd);
                                 }
@@ -1580,18 +1744,7 @@ LRESULT AppWindow::HandleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
                 case IDM_EDIT_COPY_PATH: {
                     TabItem* tab = m_tabManager.GetActiveTab();
                     if (tab && tab->document) {
-                        std::wstring path = tab->document->metadata.filePath;
-                        if (OpenClipboard(m_hWnd)) {
-                            EmptyClipboard();
-                            size_t bytes = (path.length() + 1) * sizeof(wchar_t);
-                            HGLOBAL hMem = GlobalAlloc(GHND, bytes);
-                            if (hMem) {
-                                memcpy(GlobalLock(hMem), path.c_str(), bytes);
-                                GlobalUnlock(hMem);
-                                SetClipboardData(CF_UNICODETEXT, hMem);
-                            }
-                            CloseClipboard();
-                        }
+                        CopyTextToClipboard(tab->document->metadata.filePath);
                     }
                     return 0;
                 }

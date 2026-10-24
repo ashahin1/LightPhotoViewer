@@ -36,3 +36,11 @@
 #define IDM_FILE_REVEAL         251
 #define IDM_VIEW_INFO           260
 #define IDM_HELP_SHORTCUTS      270
+
+// Tab Context Menu IDs
+#define IDM_TAB_CLOSE           301
+#define IDM_TAB_CLOSE_OTHERS    302
+#define IDM_TAB_CLOSE_RIGHT     303
+#define IDM_TAB_REOPEN          304
+#define IDM_TAB_COPY_PATH       305
+#define IDM_TAB_OPEN_FOLDER     306

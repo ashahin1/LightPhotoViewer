@@ -44,22 +44,41 @@ struct TabItem {
     }
 };
 
+struct ClosedTabState {
+    std::wstring filePath;
+    size_t frameIndex = 0;
+    float zoom = 1.0f;
+    float panX = 0.0f;
+    float panY = 0.0f;
+    bool isFitToWindow = true;
+    int rotationDegrees = 0;
+    bool flipH = false;
+    bool flipV = false;
+};
+
+using TabClosingCallback = std::function<void(TabItem*)>;
+
 class TabManager {
 public:
     TabManager();
     ~TabManager() = default;
 
     bool OpenTab(const std::wstring& filePath);
-    bool CloseTab(size_t index);
+    bool CloseTab(size_t index, TabClosingCallback callback = nullptr);
+    bool CloseOtherTabs(size_t keepIndex, TabClosingCallback callback = nullptr);
+    bool CloseTabsToTheRight(size_t index, TabClosingCallback callback = nullptr);
     bool SelectTab(size_t index);
     void NextTab();
     void PrevTab();
     bool ReopenClosedTab();
+    bool CanReopenClosedTab() const { return !m_closedTabs.empty(); }
+    size_t GetClosedTabCount() const { return m_closedTabs.size(); }
 
     size_t GetTabCount() const { return m_tabs.size(); }
     int GetActiveIndex() const { return m_activeIndex; }
     TabItem* GetActiveTab();
     const TabItem* GetTab(size_t index) const;
+    TabItem* GetTab(size_t index);
 
     bool ShouldShowTabs() const { return m_tabs.size() > 1; }
 
@@ -69,9 +88,10 @@ public:
 private:
     std::vector<std::unique_ptr<TabItem>> m_tabs;
     int m_activeIndex = -1;
-    std::deque<std::wstring> m_closedTabs;
+    std::deque<ClosedTabState> m_closedTabs;
     std::vector<std::wstring> m_recentFiles;
 
+    void RecordClosedTab(const TabItem* tab);
     void LoadRecentFilesFromRegistry();
     void SaveRecentFilesToRegistry();
 };
